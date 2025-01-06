@@ -28,7 +28,7 @@ typedef struct {
 char map[24][80];
 location spawn;             
 int i = 0;                    
-location doors[MAX_ROOMS * 4];  // Increased size for potentially more doors
+location doors[MAX_ROOMS * 2];  // Increased size for potentially more doors
 
 void init_map() {
     for(int y = 0; y < 24; y++) {
@@ -129,12 +129,16 @@ void place_doors() {
                     // Check for vertical walls
                     if(map[y][x-1] == VERTICAL) {
                         map[y][x-1] = DOOR;  // Place door in the wall
+                        if(map[y][x-2]==HORIZ)
+                        map[y][x-2]=DOOR;
                         doors[i].x = x-1;
                         doors[i].y = y;
                         i++;
                     }
                     else if(map[y][x+1] == VERTICAL) {
                         map[y][x+1] = DOOR;  // Place door in the wall
+                        if(map[y][x+2]==HORIZ)
+                        map[y][x+2] = DOOR;
                         doors[i].x = x+1;
                         doors[i].y = y;
                         i++;
@@ -153,6 +157,19 @@ void place_doors() {
                         i++;
                     }
                 }
+                    // else{
+                    //     if (map[y-1][x-1] == HORIZ && map[y][x-1] == VERTICAL){
+                    //         map[y][x-1] = DOOR;
+                    //     }
+                    //     else if(map[y-1][x+1] == HORIZ && map[y][x+1] == VERTICAL)
+                    //     map[y][x+1] = DOOR;
+
+                    //     else if(map[y+1][x-1] == HORIZ && map[y][x-1] == VERTICAL)
+                    //     map[y][x-1] = DOOR;
+                    
+                    //     else if(map[y+1][x+1] == HORIZ && map[y][x+1] == VERTICAL)
+                    //     map[y][x+1] = DOOR;
+                    // }
             }
         }
     }

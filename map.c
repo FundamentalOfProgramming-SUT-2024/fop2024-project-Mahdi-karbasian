@@ -84,28 +84,46 @@ void draw_room(Room room) {
 }
 
 void create_corridors(Room* rooms, int room_count) {
-    for(int i = 0; i < room_count - 1; i++) {
-        // Get center points of rooms
-        int start_x = rooms[i].x + rooms[i].width/2;
-        int start_y = rooms[i].y + rooms[i].height/2;
-        int end_x = rooms[i+1].x + rooms[i+1].width/2;
-        int end_y = rooms[i+1].y + rooms[i+1].height/2;
+    bool connected[MAX_ROOMS] = { false };
+    connected[0] = true; // Start with the first room connected
 
-        // Draw L-shaped corridor
-        int current_x = start_x;
-        while(current_x != end_x) {
-            if(map[start_y][current_x] == ' ') {
-                map[start_y][current_x] = '=';
+    for(int i = 1; i < room_count; i++) {
+        int closest_room = -1;
+        int min_distance = 10000;
+
+        for(int j = 0; j < i; j++) {
+            if (connected[j]) {
+                int distance = abs(rooms[i].x - rooms[j].x) + abs(rooms[i].y - rooms[j].y);
+                if (distance < min_distance) {
+                    min_distance = distance;
+                    closest_room = j;
+                }
             }
-            current_x += (current_x < end_x) ? 1 : -1;
         }
 
-        int current_y = start_y;
-        while(current_y != end_y) {
-            if(map[current_y][end_x] == ' ') {
-                map[current_y][end_x] = '=';
+        if (closest_room != -1) {
+            connected[i] = true;
+
+            int start_x = rooms[i].x + rooms[i].width / 2;
+            int start_y = rooms[i].y + rooms[i].height / 2;
+            int end_x = rooms[closest_room].x + rooms[closest_room].width / 2;
+            int end_y = rooms[closest_room].y + rooms[closest_room].height / 2;
+
+            int current_x = start_x;
+            while (current_x != end_x) {
+                if (map[start_y][current_x] == ' ') {
+                    map[start_y][current_x] = '=';
+                }
+                current_x += (current_x < end_x) ? 1 : -1;
             }
-            current_y += (current_y < end_y) ? 1 : -1;
+
+            int current_y = start_y;
+            while (current_y != end_y) {
+                if (map[current_y][end_x] == ' ') {
+                    map[current_y][end_x] = '=';
+                }
+                current_y += (current_y < end_y) ? 1 : -1;
+            }
         }
     }
 }
@@ -129,60 +147,50 @@ void place_doors() {
                     // Check for vertical walls
                     if(map[y][x-1] == VERTICAL) {
                         map[y][x-1] = DOOR;  // Place door in the wall
-                        if(map[y][x-2]==HORIZ)
-                        map[y][x-2]=DOOR;
+                        if(map[y][x-2] == HORIZ)
+                            map[y][x-2] = DOOR;
                         doors[i].x = x-1;
                         doors[i].y = y;
                         i++;
                     }
                     else if(map[y][x+1] == VERTICAL) {
                         map[y][x+1] = DOOR;  // Place door in the wall
-                        if(map[y][x+2]==HORIZ)
-                        map[y][x+2] = DOOR;
+                        if(map[y][x+2] == HORIZ)
+                            map[y][x+2] = DOOR;
                         doors[i].x = x+1;
                         doors[i].y = y;
                         i++;
                     }
                     // Check for horizontal walls
-                    else if(map[y-1][x] == HORIZ) {
+                    else if(map[y-1][x] == HORIZ || map[y-1][x]==VERTICAL) {
                         map[y-1][x] = DOOR;  // Place door in the wall
+                        if (map[y-2][x]==VERTICAL)
+                        map[y-2][x]= DOOR;
                         doors[i].x = x;
                         doors[i].y = y-1;
                         i++;
                     }
-                    else if(map[y+1][x] == HORIZ) {
+                    else if(map[y+1][x] == HORIZ||map[y+1][x]==VERTICAL) {
                         map[y+1][x] = DOOR;  // Place door in the wall
+                        if(map[y+2][x]==VERTICAL)
+                        map[y+2][x]==DOOR;
                         doors[i].x = x;
                         doors[i].y = y+1;
                         i++;
                     }
                 }
-                    // else{
-                    //     if (map[y-1][x-1] == HORIZ && map[y][x-1] == VERTICAL){
-                    //         map[y][x-1] = DOOR;
-                    //     }
-                    //     else if(map[y-1][x+1] == HORIZ && map[y][x+1] == VERTICAL)
-                    //     map[y][x+1] = DOOR;
-
-                    //     else if(map[y+1][x-1] == HORIZ && map[y][x-1] == VERTICAL)
-                    //     map[y][x-1] = DOOR;
-                    
-                    //     else if(map[y+1][x+1] == HORIZ && map[y][x+1] == VERTICAL)
-                    //     map[y][x+1] = DOOR;
-                    // }
             }
         }
     }
 }
+
 void generate_rooms() {
     Room rooms[MAX_ROOMS];
     int room_count = 0;
-    int max_attempts = 150;
-    int attempts = 0;
     i = 0; // Reset door counter
 
     // Generate rooms
-    while (room_count < 6 && attempts < max_attempts) {
+    while (room_count < 6) {
         Room new_room;
         new_room.width = MIN_ROOM_SIZE + (rand() % (MAX_ROOM_SIZE - MIN_ROOM_SIZE));
         new_room.height = MIN_ROOM_SIZE + (rand() % (MAX_ROOM_SIZE - MIN_ROOM_SIZE));
@@ -195,9 +203,6 @@ void generate_rooms() {
             rooms[room_count] = new_room;
             draw_room(new_room);
             room_count++;
-            attempts = 0;
-        } else {
-            attempts++;
         }
     }
 
@@ -207,6 +212,7 @@ void generate_rooms() {
     // Place doors where corridors meet rooms
     place_doors();
 }
+
 void draw_borders() {
     for(int i = 1; i < 79; i++) {
         if(i % 2 == 1) {

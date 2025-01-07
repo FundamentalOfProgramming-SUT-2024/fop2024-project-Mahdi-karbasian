@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <stdbool.h>  
+#include <stdbool.h>
 #include <regex.h>
 
 typedef struct {
@@ -62,6 +62,7 @@ void draw_menu(void) {
 void main_menu(void) {
     clear();
     mvprintw(4, menu_x - 5, "WELCOME %s!", current_user);
+    refresh(); // Add refresh here to ensure it's displaying correctly
 
     for (int i = 0; i < 4; i++) {  // Show all 4 main menu items
         if (i == selected && has_colors()) {
@@ -195,16 +196,18 @@ void create_user(void) {
             mvprintw(10, 2, "Username already exists!");
             break;
         }
-        if (strcmp(old_user.email, new_user.email) == 0) {
-            valid = 0;
-            mvprintw(10, 2, "Email already registered!");
-            break;
-        }
+        // if (strcmp(old_user.email, new_user.email) == 0) {
+        //     valid = 0;
+        //     mvprintw(10, 2, "Email already registered!");
+        //     break;
+        // }
     }
 
     if (valid) {
         fwrite(&new_user, sizeof(User), 1, users);
         mvprintw(10, 2, "Account created successfully! Press any key to continue.");
+        is_logged_in = true;
+        strncpy(current_user, new_user.username, sizeof(current_user) - 1); // Set the current user
     }
     
     fclose(users);
@@ -295,7 +298,12 @@ int main(void) {
                 case '\n':
                     if (selected == 0) {
                         create_user();
-                        draw_menu();  // Redraw menu after creating user
+                        if (is_logged_in) {
+                            selected = 0; // Reset selection for main menu
+                            main_menu(); // Draw main menu immediately after account creation
+                        } else {
+                            draw_menu(); // Redraw login menu if account creation failed
+                        }
                     } else if (selected == 1) {
                         is_logged_in = login_user();
                         if (is_logged_in) {
@@ -318,7 +326,7 @@ int main(void) {
                     main_menu();  // Update main menu
                     break;
                 case '\n':
-                    selected = 1;
+                    // Handle main menu selections here
                     break;
             }
         }

@@ -4,14 +4,18 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <time.h>
+#include <limits.h>
 
 #define VERTICAL '|'
 #define HORIZ '_'
 #define DOOR '+'
 #define FLOOR '.'
 #define MIN_ROOM_SIZE 4
-#define MAX_ROOM_SIZE 12
-#define MAX_ROOMS 8
+#define MAX_ROOM_SIZE 16
+#define MAX_ROOMS 12
+
+#define MAP_WIDTH 160
+#define MAP_HEIGHT 40
 
 typedef struct {
     int x;
@@ -25,155 +29,171 @@ typedef struct {
     int height;
 } Room;
 
-char map[24][80];
-location spawn;             
-int i = 0;                    
-location doors[MAX_ROOMS * 2];  // Increased size for potentially more doors
+char map[MAP_HEIGHT][MAP_WIDTH];
+location spawn;
+int i = 0;
+location doors[MAX_ROOMS * 2];
 
 void init_map() {
-    for(int y = 0; y < 24; y++) {
-        for(int x = 0; x < 80; x++) {
+    for (int y = 0; y < MAP_HEIGHT; y++) {
+        for (int x = 0; x < MAP_WIDTH; x++) {
             map[y][x] = ' ';
         }
     }
 }
 
 bool check_room_overlap(Room new_room, Room* rooms, int room_count) {
-    // Add a 2-pixel buffer around each room
     const int BUFFER = 2;
-    
-    for(int i = 0; i < room_count; i++) {
-        // Check if the new room (with buffer) overlaps with any existing room (with buffer)
-        if(new_room.x - BUFFER < rooms[i].x + rooms[i].width + BUFFER &&
-           new_room.x + new_room.width + BUFFER > rooms[i].x - BUFFER &&
-           new_room.y - BUFFER < rooms[i].y + rooms[i].height + BUFFER &&
-           new_room.y + new_room.height + BUFFER > rooms[i].y - BUFFER) {
+
+    for (int i = 0; i < room_count; i++) {
+        if (new_room.x - BUFFER < rooms[i].x + rooms[i].width + BUFFER &&
+            new_room.x + new_room.width + BUFFER > rooms[i].x - BUFFER &&
+            new_room.y - BUFFER < rooms[i].y + rooms[i].height + BUFFER &&
+            new_room.y + new_room.height + BUFFER > rooms[i].y - BUFFER) {
             return true;
         }
     }
-    
-    // Also check if the room (with buffer) would be too close to the map borders
-    if(new_room.x - BUFFER < 2 ||  // Left border
-       new_room.x + new_room.width + BUFFER > 77 ||  // Right border
-       new_room.y - BUFFER < 2 ||  // Top border
-       new_room.y + new_room.height + BUFFER > 21) {  // Bottom border
+
+    if (new_room.x - BUFFER < 2 || new_room.x + new_room.width + BUFFER > MAP_WIDTH - 2 ||
+        new_room.y - BUFFER < 2 || new_room.y + new_room.height + BUFFER > MAP_HEIGHT - 2) {
         return true;
     }
-    
+
     return false;
 }
 
 void draw_room(Room room) {
-    // Draw floor
-    for(int y = room.y + 1; y < room.y + room.height; y++) {
-        for(int x = room.x + 1; x < room.x + room.width; x++) {
+    for (int y = room.y + 1; y < room.y + room.height; y++) {
+        for (int x = room.x + 1; x < room.x + room.width; x++) {
             map[y][x] = FLOOR;
         }
     }
 
-    // Draw walls
-    for(int x = room.x; x <= room.x + room.width; x++) {
-        map[room.y][x] = HORIZ;  // Top wall
-        map[room.y + room.height][x] = HORIZ;  // Bottom wall
+    for (int x = room.x; x <= room.x + room.width; x++) {
+        map[room.y][x] = HORIZ;
+        map[room.y + room.height][x] = HORIZ;
     }
 
-    for(int y = room.y; y <= room.y + room.height; y++) {
-        map[y][room.x] = VERTICAL;  // Left wall
-        map[y][room.x + room.width] = VERTICAL;  // Right wall
+    for (int y = room.y; y <= room.y + room.height; y++) {
+        map[y][room.x] = VERTICAL;
+        map[y][room.x + room.width] = VERTICAL;
     }
 }
 
 void create_corridors(Room* rooms, int room_count) {
     bool connected[MAX_ROOMS] = { false };
-    connected[0] = true; // Start with the first room connected
+    connected[0] = true;
 
-    for(int i = 1; i < room_count; i++) {
-        int closest_room = -1;
-        int min_distance = 10000;
+    // Use Prim's algorithm to create a minimum spanning tree
+    for (int count = 1; count < room_count; count++) {
+        int best_src = -1;
+        int best_dst = -1;
+        int min_distance = INT_MAX;
 
-        for(int j = 0; j < i; j++) {
-            if (connected[j]) {
+        // Find the closest connection between a connected and unconnected room
+        for (int i = 0; i < room_count; i++) {
+            if (!connected[i]) continue;
+            
+            for (int j = 0; j < room_count; j++) {
+                if (connected[j]) continue;
+                
                 int distance = abs(rooms[i].x - rooms[j].x) + abs(rooms[i].y - rooms[j].y);
                 if (distance < min_distance) {
                     min_distance = distance;
-                    closest_room = j;
+                    best_src = i;
+                    best_dst = j;
                 }
             }
         }
 
-        if (closest_room != -1) {
-            connected[i] = true;
+        if (best_src != -1 && best_dst != -1) {
+            connected[best_dst] = true;
 
-            int start_x = rooms[i].x + rooms[i].width / 2;
-            int start_y = rooms[i].y + rooms[i].height / 2;
-            int end_x = rooms[closest_room].x + rooms[closest_room].width / 2;
-            int end_y = rooms[closest_room].y + rooms[closest_room].height / 2;
+            // Draw corridor between rooms
+            int start_x = rooms[best_src].x + rooms[best_src].width / 2;
+            int start_y = rooms[best_src].y + rooms[best_src].height / 2;
+            int end_x = rooms[best_dst].x + rooms[best_dst].width / 2;
+            int end_y = rooms[best_dst].y + rooms[best_dst].height / 2;
 
-            int current_x = start_x;
-            while (current_x != end_x) {
-                if (map[start_y][current_x] == ' ') {
-                    map[start_y][current_x] = '=';
+            // Draw L-shaped corridor
+            if (rand() % 2 == 0) {
+                // Horizontal first, then vertical
+                int current_x = start_x;
+                while (current_x != end_x) {
+                    if (map[start_y][current_x] == ' ') {
+                        map[start_y][current_x] = '=';
+                    }
+                    current_x += (current_x < end_x) ? 1 : -1;
                 }
-                current_x += (current_x < end_x) ? 1 : -1;
-            }
-
-            int current_y = start_y;
-            while (current_y != end_y) {
-                if (map[current_y][end_x] == ' ') {
-                    map[current_y][end_x] = '=';
+                
+                int current_y = start_y;
+                while (current_y != end_y) {
+                    if (map[current_y][end_x] == ' ') {
+                        map[current_y][end_x] = '=';
+                    }
+                    current_y += (current_y < end_y) ? 1 : -1;
                 }
-                current_y += (current_y < end_y) ? 1 : -1;
+            } else {
+                // Vertical first, then horizontal
+                int current_y = start_y;
+                while (current_y != end_y) {
+                    if (map[current_y][start_x] == ' ') {
+                        map[current_y][start_x] = '=';
+                    }
+                    current_y += (current_y < end_y) ? 1 : -1;
+                }
+                
+                int current_x = start_x;
+                while (current_x != end_x) {
+                    if (map[end_y][current_x] == ' ') {
+                        map[end_y][current_x] = '=';
+                    }
+                    current_x += (current_x < end_x) ? 1 : -1;
+                }
             }
         }
     }
 }
 
 void place_doors() {
-    for(int y = 1; y < 23; y++) {
-        for(int x = 1; x < 79; x++) {
-            if(map[y][x] == '=') {
-                // Check if current position is near a corner by looking for wall intersections
+    for (int y = 1; y < MAP_HEIGHT - 1; y++) {
+        for (int x = 1; x < MAP_WIDTH - 1; x++) {
+            if (map[y][x] == '=') {
                 bool is_corner = false;
-                
-                // Check for corner patterns
-                if((map[y-1][x-1] == HORIZ && map[y][x-1] == VERTICAL) ||
-                   (map[y-1][x+1] == HORIZ && map[y][x+1] == VERTICAL) ||
-                   (map[y+1][x-1] == HORIZ && map[y][x-1] == VERTICAL) ||
-                   (map[y+1][x+1] == HORIZ && map[y][x+1] == VERTICAL)) {
+
+                if ((map[y-1][x-1] == HORIZ && map[y][x-1] == VERTICAL) ||
+                    (map[y-1][x+1] == HORIZ && map[y][x+1] == VERTICAL) ||
+                    (map[y+1][x-1] == HORIZ && map[y][x-1] == VERTICAL) ||
+                    (map[y+1][x+1] == HORIZ && map[y][x+1] == VERTICAL)) {
                     is_corner = true;
                 }
 
-                if(!is_corner) {
-                    // Check for vertical walls
-                    if(map[y][x-1] == VERTICAL) {
-                        map[y][x-1] = DOOR;  // Place door in the wall
-                        if(map[y][x-2] == HORIZ)
+                if (!is_corner) {
+                    if (map[y][x-1] == VERTICAL) {
+                        map[y][x-1] = DOOR;
+                        if (map[y][x-2] == HORIZ)
                             map[y][x-2] = DOOR;
                         doors[i].x = x-1;
                         doors[i].y = y;
                         i++;
-                    }
-                    else if(map[y][x+1] == VERTICAL) {
-                        map[y][x+1] = DOOR;  // Place door in the wall
-                        if(map[y][x+2] == HORIZ)
+                    } else if (map[y][x+1] == VERTICAL) {
+                        map[y][x+1] = DOOR;
+                        if (map[y][x+2] == HORIZ)
                             map[y][x+2] = DOOR;
                         doors[i].x = x+1;
                         doors[i].y = y;
                         i++;
-                    }
-                    // Check for horizontal walls
-                    else if(map[y-1][x] == HORIZ || map[y-1][x]==VERTICAL) {
-                        map[y-1][x] = DOOR;  // Place door in the wall
-                        if (map[y-2][x]==VERTICAL)
-                        map[y-2][x]= DOOR;
+                    } else if (map[y-1][x] == HORIZ || map[y-1][x] == VERTICAL) {
+                        map[y-1][x] = DOOR;
+                        if (map[y-2][x] == VERTICAL)
+                            map[y-2][x] = DOOR;
                         doors[i].x = x;
                         doors[i].y = y-1;
                         i++;
-                    }
-                    else if(map[y+1][x] == HORIZ||map[y+1][x]==VERTICAL) {
-                        map[y+1][x] = DOOR;  // Place door in the wall
-                        if(map[y+2][x]==VERTICAL)
-                        map[y+2][x]==DOOR;
+                    } else if (map[y+1][x] == HORIZ || map[y+1][x] == VERTICAL) {
+                        map[y+1][x] = DOOR;
+                        if (map[y+2][x] == VERTICAL)
+                            map[y+2][x] = DOOR;
                         doors[i].x = x;
                         doors[i].y = y+1;
                         i++;
@@ -187,52 +207,80 @@ void place_doors() {
 void generate_rooms() {
     Room rooms[MAX_ROOMS];
     int room_count = 0;
-    i = 0; // Reset door counter
-
-    // Generate rooms
-    while (room_count < 6) {
+    i = 0;
+    int attempts = 0;
+    const int MAX_ATTEMPTS = 1000;
+    const int MIN_ROOMS = 6;
+    
+    // First, generate the minimum required rooms (6)
+    while (room_count < MIN_ROOMS && attempts < MAX_ATTEMPTS) {
         Room new_room;
         new_room.width = MIN_ROOM_SIZE + (rand() % (MAX_ROOM_SIZE - MIN_ROOM_SIZE));
         new_room.height = MIN_ROOM_SIZE + (rand() % (MAX_ROOM_SIZE - MIN_ROOM_SIZE));
-        
-        // Adjust the range for room placement to account for buffer space
-        new_room.x = 3 + (rand() % (73 - new_room.width));
-        new_room.y = 3 + (rand() % (18 - new_room.height));
+
+        new_room.x = 3 + (rand() % (MAP_WIDTH - new_room.width - 6));
+        new_room.y = 3 + (rand() % (MAP_HEIGHT - new_room.height - 6));
 
         if (!check_room_overlap(new_room, rooms, room_count)) {
             rooms[room_count] = new_room;
             draw_room(new_room);
             room_count++;
         }
+        attempts++;
     }
 
-    // Create corridors between rooms
-    create_corridors(rooms, room_count);
+    // Try to add additional rooms
+    attempts = 0;
+    while (room_count < MAX_ROOMS && attempts < MAX_ATTEMPTS/2) {
+        // 40% chance to try adding another room
+        if (rand() % 100 < 40) {
+            Room new_room;
+            new_room.width = MIN_ROOM_SIZE + (rand() % (MAX_ROOM_SIZE - MIN_ROOM_SIZE));
+            new_room.height = MIN_ROOM_SIZE + (rand() % (MAX_ROOM_SIZE - MIN_ROOM_SIZE));
 
-    // Place doors where corridors meet rooms
+            new_room.x = 3 + (rand() % (MAP_WIDTH - new_room.width - 6));
+            new_room.y = 3 + (rand() % (MAP_HEIGHT - new_room.height - 6));
+
+            if (!check_room_overlap(new_room, rooms, room_count)) {
+                rooms[room_count] = new_room;
+                draw_room(new_room);
+                room_count++;
+            }
+        }
+        attempts++;
+    }
+
+    // If we couldn't generate minimum rooms, print error and exit
+    if (room_count < MIN_ROOMS) {
+        endwin();
+        fprintf(stderr, "Error: Could not generate minimum number of rooms\n");
+        exit(1);
+    }
+
+    create_corridors(rooms, room_count);
     place_doors();
 }
 
 void draw_borders() {
-    for(int i = 1; i < 79; i++) {
-        if(i % 2 == 1) {
+    for (int i = 1; i < MAP_WIDTH; i++) {
+        if (i % 2 == 1) {
             mvprintw(0, i, "/");
-            mvprintw(23, i, "\\");
+            mvprintw(MAP_HEIGHT - 1, i, "\\");
         } else {
             mvprintw(0, i, "\\");
-            mvprintw(23, i, "/");
+            mvprintw(MAP_HEIGHT - 1, i, "/");
         }
     }
-    for(int i = 1; i < 23; i++) {
+    for (int i = 1; i < MAP_HEIGHT; i++) {
         mvprintw(i, 1, "<");
-        mvprintw(i, 79, ">");
+        mvprintw(i, MAP_WIDTH - 1, ">");
     }
 }
 
 void draw_map() {
-    for(int y = 0; y < 24; y++) {
-        for(int x = 0; x < 80; x++) {
-            if(map[y][x] != ' ') {
+    for (int y = 0; y < MAP_HEIGHT; y++) {
+        for (int x = 0; x < MAP_WIDTH; x++) {
+            if (map[y][x] != ' ') {
                 mvprintw(y, x, "%c", map[y][x]);
             }
         }
@@ -256,40 +304,40 @@ int main() {
     refresh();
 
     int ch;
-    while((ch = getch()) != 'q') {
+    while ((ch = getch()) != 'q') {
         mvprintw(player.y, player.x, " ");
-        
+
         switch (ch) {
             case KEY_UP:
-                if(player.y > 1 && map[player.y-1][player.x] != VERTICAL && 
-                   map[player.y-1][player.x] != HORIZ && 
-                   (map[player.y-1][player.x] == FLOOR || map[player.y-1][player.x] == DOOR || 
-                    map[player.y-1][player.x] == '='))
+                if (player.y > 1 && map[player.y-1][player.x] != VERTICAL &&
+                    map[player.y-1][player.x] != HORIZ &&
+                    (map[player.y-1][player.x] == FLOOR || map[player.y-1][player.x] == DOOR ||
+                     map[player.y-1][player.x] == '='))
                     player.y--;
                 break;
             case KEY_DOWN:
-                if(player.y < 22 && map[player.y+1][player.x] != VERTICAL && 
-                   map[player.y+1][player.x] != HORIZ && 
-                   (map[player.y+1][player.x] == FLOOR || map[player.y+1][player.x] == DOOR || 
-                    map[player.y+1][player.x] == '='))
+                if (player.y < MAP_HEIGHT - 2 && map[player.y+1][player.x] != VERTICAL &&
+                    map[player.y+1][player.x] != HORIZ &&
+                    (map[player.y+1][player.x] == FLOOR || map[player.y+1][player.x] == DOOR ||
+                     map[player.y+1][player.x] == '='))
                     player.y++;
                 break;
             case KEY_LEFT:
-                if(player.x > 3 && map[player.y][player.x-1] != VERTICAL && 
-                   map[player.y][player.x-1] != HORIZ && 
-                   (map[player.y][player.x-1] == FLOOR || map[player.y][player.x-1] == DOOR || 
-                    map[player.y][player.x-1] == '='))
+                if (player.x > 1 && map[player.y][player.x-1] != VERTICAL &&
+                    map[player.y][player.x-1] != HORIZ &&
+                    (map[player.y][player.x-1] == FLOOR || map[player.y][player.x-1] == DOOR ||
+                     map[player.y][player.x-1] == '='))
                     player.x--;
                 break;
             case KEY_RIGHT:
-                if(player.x < 77 && map[player.y][player.x+1] != VERTICAL && 
-                   map[player.y][player.x+1] != HORIZ && 
-                   (map[player.y][player.x+1] == FLOOR || map[player.y][player.x+1] == DOOR || 
-                    map[player.y][player.x+1] == '='))
+                if (player.x < MAP_WIDTH - 2 && map[player.y][player.x+1] != VERTICAL &&
+                    map[player.y][player.x+1] != HORIZ &&
+                    (map[player.y][player.x+1] == FLOOR || map[player.y][player.x+1] == DOOR ||
+                     map[player.y][player.x+1] == '='))
                     player.x++;
                 break;
         }
-        
+
         draw_borders();
         draw_map();
         mvprintw(player.y, player.x, "@");

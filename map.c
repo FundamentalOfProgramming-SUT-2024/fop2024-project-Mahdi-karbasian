@@ -84,7 +84,7 @@ void create_corridors(Room* rooms, int room_count) {
     bool connected[MAX_ROOMS] = { false };
     connected[0] = true;
 
-    // Use Prim's algorithm to create a minimum spanning tree
+
     for (int count = 1; count < room_count; count++) {
         int best_src = -1;
         int best_dst = -1;

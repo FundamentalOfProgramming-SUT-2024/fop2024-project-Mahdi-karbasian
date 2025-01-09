@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <regex.h>
+#include <ctype.h>
 
 typedef struct {
     char username[50];
@@ -83,7 +84,20 @@ void main_menu(void) {
     }
     refresh();
 }
-
+bool is_valid_password(const char *password) {
+    bool has_upper = false;
+    bool has_lower = false;
+    bool has_digit = false;
+    
+    // Check each character in the password
+    for (int i = 0; password[i] != '\0'; i++) {
+        if (isupper(password[i])) has_upper = true;
+        if (islower(password[i])) has_lower = true;
+        if (isdigit(password[i])) has_digit = true;
+    }
+    
+    return has_upper && has_lower && has_digit;
+}
 // Add these helper functions above create_user()
 int is_valid_email_format(const char *email, regex_t *regex) {
     return regexec(regex, email, 0, NULL, 0) == 0;
@@ -132,8 +146,24 @@ void create_user(void) {
     mvprintw(6, 2, "Username: ");
     getstr(new_user.username);
 
-    mvprintw(7, 2, "Password: ");
-    getstr(new_user.password);
+// Replace the simple password input with this enhanced version
+    bool valid_password = false;
+    do {
+        mvprintw(7, 2, "Password (must contain at least 1 uppercase, 1 lowercase, and 1 number): ");
+        getstr(new_user.password);
+        
+        if (!is_valid_password(new_user.password)) {
+            mvprintw(10, 2, "Password must contain at least 1 uppercase letter, 1 lowercase letter, and 1 number!");
+            refresh();
+            getch();
+            move(10, 2);
+            clrtoeol();
+            move(7, 2);
+            clrtoeol();
+        } else {
+            valid_password = true;
+        }
+    } while (!valid_password);
 
     // Enhanced email validation
     int valid_email = 0;

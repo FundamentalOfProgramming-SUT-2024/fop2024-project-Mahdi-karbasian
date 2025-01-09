@@ -10,6 +10,8 @@
 #define HORIZ '_'
 #define DOOR '+'
 #define FLOOR '.'
+#define PILLAR 'O'
+
 #define MIN_ROOM_SIZE 4
 #define MAX_ROOM_SIZE 16
 #define MAX_ROOMS 12
@@ -204,6 +206,46 @@ void place_doors() {
     }
 }
 
+void place_pillars(Room room) {
+    int max_pillars = (room.width * room.height) / 20;
+    int num_pillars = 1 + (rand() % max_pillars);
+    
+    for (int i = 0; i < num_pillars; i++) {
+        int attempts = 0;
+        while (attempts < 10) {
+            // Generate random position inside the room (excluding walls and a buffer from edges)
+            int x = room.x + 2 + (rand() % (room.width - 3));  // Keep 2 tiles from edges
+            int y = room.y + 2 + (rand() % (room.height - 3)); // Keep 2 tiles from edges
+            
+            // Check if the position is suitable
+            if (map[y][x] == FLOOR) {
+                // Check a larger surrounding area for doors, corridors, and other pillars
+                bool is_suitable = true;
+                for (int dy = -2; dy <= 2; dy++) {
+                    for (int dx = -2; dx <= 2; dx++) {
+                        char nearby_tile = map[y + dy][x + dx];
+                        // Don't place if near doors, corridors, or other pillars
+                        if (nearby_tile == DOOR || 
+                            nearby_tile == '=' || 
+                            nearby_tile == PILLAR) {
+                            is_suitable = false;
+                            break;
+                        }
+                    }
+                    if (!is_suitable) break;
+                }
+                
+                // If position is suitable, place the pillar
+                if (is_suitable) {
+                    map[y][x] = PILLAR;
+                    break;
+                }
+            }
+            attempts++;
+        }
+    }
+}
+
 void generate_rooms() {
     Room rooms[MAX_ROOMS];
     int room_count = 0;
@@ -222,10 +264,11 @@ void generate_rooms() {
         new_room.y = 3 + (rand() % (MAP_HEIGHT - new_room.height - 6));
 
         if (!check_room_overlap(new_room, rooms, room_count)) {
-            rooms[room_count] = new_room;
-            draw_room(new_room);
-            room_count++;
-        }
+        rooms[room_count] = new_room;
+        draw_room(new_room);
+        place_pillars(new_room);  // Add this line
+        room_count++;
+    }
         attempts++;
     }
 
@@ -307,36 +350,36 @@ int main() {
     while ((ch = getch()) != 'q') {
         mvprintw(player.y, player.x, " ");
 
-        switch (ch) {
-            case KEY_UP:
-                if (player.y > 1 && map[player.y-1][player.x] != VERTICAL &&
-                    map[player.y-1][player.x] != HORIZ &&
-                    (map[player.y-1][player.x] == FLOOR || map[player.y-1][player.x] == DOOR ||
-                     map[player.y-1][player.x] == '='))
-                    player.y--;
-                break;
-            case KEY_DOWN:
-                if (player.y < MAP_HEIGHT - 2 && map[player.y+1][player.x] != VERTICAL &&
-                    map[player.y+1][player.x] != HORIZ &&
-                    (map[player.y+1][player.x] == FLOOR || map[player.y+1][player.x] == DOOR ||
-                     map[player.y+1][player.x] == '='))
-                    player.y++;
-                break;
-            case KEY_LEFT:
-                if (player.x > 1 && map[player.y][player.x-1] != VERTICAL &&
-                    map[player.y][player.x-1] != HORIZ &&
-                    (map[player.y][player.x-1] == FLOOR || map[player.y][player.x-1] == DOOR ||
-                     map[player.y][player.x-1] == '='))
-                    player.x--;
-                break;
-            case KEY_RIGHT:
-                if (player.x < MAP_WIDTH - 2 && map[player.y][player.x+1] != VERTICAL &&
-                    map[player.y][player.x+1] != HORIZ &&
-                    (map[player.y][player.x+1] == FLOOR || map[player.y][player.x+1] == DOOR ||
-                     map[player.y][player.x+1] == '='))
-                    player.x++;
-                break;
-        }
+switch (ch) {
+    case KEY_UP:
+        if (player.y > 1 && map[player.y-1][player.x] != VERTICAL &&
+            map[player.y-1][player.x] != HORIZ && map[player.y-1][player.x] != PILLAR &&
+            (map[player.y-1][player.x] == FLOOR || map[player.y-1][player.x] == DOOR ||
+             map[player.y-1][player.x] == '='))
+            player.y--;
+        break;
+    case KEY_DOWN:
+        if (player.y < MAP_HEIGHT - 2 && map[player.y+1][player.x] != VERTICAL &&
+            map[player.y+1][player.x] != HORIZ && map[player.y+1][player.x] != PILLAR &&
+            (map[player.y+1][player.x] == FLOOR || map[player.y+1][player.x] == DOOR ||
+             map[player.y+1][player.x] == '='))
+            player.y++;
+        break;
+    case KEY_LEFT:
+        if (player.x > 1 && map[player.y][player.x-1] != VERTICAL &&
+            map[player.y][player.x-1] != HORIZ && map[player.y][player.x-1] != PILLAR &&
+            (map[player.y][player.x-1] == FLOOR || map[player.y][player.x-1] == DOOR ||
+             map[player.y][player.x-1] == '='))
+            player.x--;
+        break;
+    case KEY_RIGHT:
+        if (player.x < MAP_WIDTH - 2 && map[player.y][player.x+1] != VERTICAL &&
+            map[player.y][player.x+1] != HORIZ && map[player.y][player.x+1] != PILLAR &&
+            (map[player.y][player.x+1] == FLOOR || map[player.y][player.x+1] == DOOR ||
+             map[player.y][player.x+1] == '='))
+            player.x++;
+        break;
+}
 
         draw_borders();
         draw_map();

@@ -11,6 +11,9 @@
 #define DOOR '+'
 #define FLOOR '.'
 #define PILLAR 'O'
+#define GOLD_SMALL '*'    // 1 gold
+#define GOLD_MEDIUM '$'   // 5 gold
+#define GOLD_LARGE 'G'    // 10 gold
 
 #define MIN_ROOM_SIZE 4
 #define MAX_ROOM_SIZE 16
@@ -246,6 +249,59 @@ void place_pillars(Room room) {
     }
 }
 
+void place_gold(Room* rooms, int room_count) {
+    const float ROOM_CHANCE = 0.7f;  // 70% chance for a room to have gold
+    const int GOLD_PER_ROOM = 2;     // Number of gold piles per room
+    
+    for (int r = 0; r < room_count; r++) {
+        if ((float)rand() / RAND_MAX > ROOM_CHANCE) {
+            continue;
+        }
+
+        Room room = rooms[r];
+        int gold_placed = 0;
+        int attempts = 0;
+        
+        while (gold_placed < GOLD_PER_ROOM && attempts < 20) {
+            int x = room.x + 2 + (rand() % (room.width - 3));
+            int y = room.y + 2 + (rand() % (room.height - 3));
+            
+            if (map[y][x] == FLOOR) {
+                bool is_suitable = true;
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dx = -1; dx <= 1; dx++) {
+                        char nearby_tile = map[y + dy][x + dx];
+                        if (nearby_tile == DOOR || 
+                            nearby_tile == '=' || 
+                            nearby_tile == PILLAR || 
+                            nearby_tile == GOLD_SMALL ||
+                            nearby_tile == GOLD_MEDIUM ||
+                            nearby_tile == GOLD_LARGE) {
+                            is_suitable = false;
+                            break;
+                        }
+                    }
+                    if (!is_suitable) break;
+                }
+                
+                if (is_suitable) {
+                    // Randomly choose gold type
+                    int gold_type = rand() % 100;
+                    if (gold_type < 60) {          // 60% chance for small gold
+                        map[y][x] = GOLD_SMALL;
+                    } else if (gold_type < 90) {   // 30% chance for medium gold
+                        map[y][x] = GOLD_MEDIUM;
+                    } else {                       // 10% chance for large gold
+                        map[y][x] = GOLD_LARGE;
+                    }
+                    gold_placed++;
+                }
+            }
+            attempts++;
+        }
+    }
+}
+
 void generate_rooms() {
     Room rooms[MAX_ROOMS];
     int room_count = 0;
@@ -266,7 +322,8 @@ void generate_rooms() {
         if (!check_room_overlap(new_room, rooms, room_count)) {
         rooms[room_count] = new_room;
         draw_room(new_room);
-        place_pillars(new_room);  // Add this line
+        place_pillars(new_room);
+        place_gold(rooms,room_count);
         room_count++;
     }
         attempts++;
@@ -338,48 +395,64 @@ int main() {
     srand(time(NULL));
 
     init_map();
+    location player = {doors[0].x, doors[0].y};
     generate_rooms();
 
     draw_borders();
     draw_map();
-    location player = {doors[0].x, doors[0].y};
     mvprintw(player.y, player.x, "@");
     refresh();
 
+    int score = 0;
     int ch;
     while ((ch = getch()) != 'q') {
         mvprintw(player.y, player.x, " ");
-
+        mvprintw(40,1,"                                      ");
 switch (ch) {
     case KEY_UP:
         if (player.y > 1 && map[player.y-1][player.x] != VERTICAL &&
             map[player.y-1][player.x] != HORIZ && map[player.y-1][player.x] != PILLAR &&
             (map[player.y-1][player.x] == FLOOR || map[player.y-1][player.x] == DOOR ||
-             map[player.y-1][player.x] == '='))
+             map[player.y-1][player.x] == '='||map[player.y-1][player.x] == GOLD_SMALL||map[player.y-1][player.x] == GOLD_MEDIUM||map[player.y-1][player.x] == GOLD_LARGE))
             player.y--;
         break;
     case KEY_DOWN:
         if (player.y < MAP_HEIGHT - 2 && map[player.y+1][player.x] != VERTICAL &&
             map[player.y+1][player.x] != HORIZ && map[player.y+1][player.x] != PILLAR &&
             (map[player.y+1][player.x] == FLOOR || map[player.y+1][player.x] == DOOR ||
-             map[player.y+1][player.x] == '='))
+             map[player.y+1][player.x] == '='||map[player.y+1][player.x] == GOLD_SMALL||map[player.y+1][player.x] == GOLD_MEDIUM||map[player.y+1][player.x] == GOLD_LARGE))
             player.y++;
         break;
     case KEY_LEFT:
         if (player.x > 1 && map[player.y][player.x-1] != VERTICAL &&
             map[player.y][player.x-1] != HORIZ && map[player.y][player.x-1] != PILLAR &&
             (map[player.y][player.x-1] == FLOOR || map[player.y][player.x-1] == DOOR ||
-             map[player.y][player.x-1] == '='))
+             map[player.y][player.x-1] == '='||map[player.y][player.x-1] == GOLD_LARGE||map[player.y][player.x-1] == GOLD_MEDIUM||map[player.y][player.x-1] == GOLD_SMALL))
             player.x--;
         break;
     case KEY_RIGHT:
         if (player.x < MAP_WIDTH - 2 && map[player.y][player.x+1] != VERTICAL &&
             map[player.y][player.x+1] != HORIZ && map[player.y][player.x+1] != PILLAR &&
             (map[player.y][player.x+1] == FLOOR || map[player.y][player.x+1] == DOOR ||
-             map[player.y][player.x+1] == '='))
+             map[player.y][player.x+1] == '='||map[player.y][player.x+1] == GOLD_SMALL||map[player.y][player.x+1] == GOLD_MEDIUM||map[player.y][player.x+1] == GOLD_LARGE))
             player.x++;
         break;
 }
+    if(map[player.y][player.x] == GOLD_SMALL) {
+        map[player.y][player.x] = FLOOR;
+        score += 1;
+        mvprintw(40, 1, "You found a small pile of gold! (+1)");
+    } else if(map[player.y][player.x] == GOLD_MEDIUM) {
+        map[player.y][player.x] = FLOOR;
+        score += 5;
+        mvprintw(40, 1, "You found a medium pile of gold! (+5)");
+    } else if(map[player.y][player.x] == GOLD_LARGE) {
+        map[player.y][player.x] = FLOOR;
+        score += 10;
+        mvprintw(40, 1, "You found a large pile of gold! (+10)");
+    }
+    
+    mvprintw(41, 1, "Score = %d", score);
 
         draw_borders();
         draw_map();

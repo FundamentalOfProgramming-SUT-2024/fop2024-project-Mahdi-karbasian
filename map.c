@@ -14,6 +14,7 @@
 #define GOLD_SMALL '*'    // 1 gold
 #define GOLD_MEDIUM '$'   // 5 gold
 #define GOLD_LARGE 'G'    // 10 gold
+#define STAIR '<'
 
 #define MIN_ROOM_SIZE 4
 #define MAX_ROOM_SIZE 16
@@ -33,6 +34,20 @@ typedef struct {
     int width;
     int height;
 } Room;
+
+typedef struct {
+    Room room;
+    location stair_pos;
+    int original_x;  // Store the original x position of the room
+    int original_y;  // Store the original y position of the room
+} StairInfo;
+
+typedef struct {
+    Room rooms[MAX_ROOMS];
+    int room_count;
+} Level;
+
+Level current_level;
 
 char map[MAP_HEIGHT][MAP_WIDTH];
 location spawn;
@@ -83,6 +98,64 @@ void draw_room(Room room) {
         map[y][room.x] = VERTICAL;
         map[y][room.x + room.width] = VERTICAL;
     }
+}
+
+Room find_furthest_room(Room* rooms, int room_count, location start_pos) {
+    Room furthest_room = rooms[0];
+    int max_distance = 0;
+    
+    for (int i = 0; i < room_count; i++) {
+        // Calculate distance from room center to start position
+        int room_center_x = rooms[i].x + (rooms[i].width / 2);
+        int room_center_y = rooms[i].y + (rooms[i].height / 2);
+        
+        int distance = abs(room_center_x - start_pos.x) + 
+                      abs(room_center_y - start_pos.y);
+                      
+        if (distance > max_distance) {
+            max_distance = distance;
+            furthest_room = rooms[i];
+        }
+    }
+    
+    return furthest_room;
+}
+
+location place_staircase(Room room) {
+    location stair_pos;
+    
+    // Try to place the staircase near the center of the room
+    int center_x = room.x + (room.width / 2);
+    int center_y = room.y + (room.height / 2);
+    
+    // Check a few positions around the center for a suitable spot
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            int x = center_x + dx;
+            int y = center_y + dy;
+            
+            if (map[y][x] == FLOOR) {
+                map[y][x] = STAIR;
+                stair_pos.x = x;
+                stair_pos.y = y;
+                return stair_pos;
+            }
+        }
+    }
+    
+    // If we couldn't place near center, try anywhere in the room
+    for (int y = room.y + 1; y < room.y + room.height; y++) {
+        for (int x = room.x + 1; x < room.x + room.width; x++) {
+            if (map[y][x] == FLOOR) {
+                map[y][x] = STAIR;
+                stair_pos.x = x;
+                stair_pos.y = y;
+                return stair_pos;
+            }
+        }
+    }
+    
+    return stair_pos;
 }
 
 void create_corridors(Room* rooms, int room_count) {
@@ -302,16 +375,34 @@ void place_gold(Room* rooms, int room_count) {
     }
 }
 
-void generate_rooms() {
-    Room rooms[MAX_ROOMS];
-    int room_count = 0;
+void generate_rooms(StairInfo* prev_stair, location* player_pos) {
+    current_level.room_count = 0;
     i = 0;
     int attempts = 0;
     const int MAX_ATTEMPTS = 1000;
     const int MIN_ROOMS = 6;
     
-    // First, generate the minimum required rooms (6)
-    while (room_count < MIN_ROOMS && attempts < MAX_ATTEMPTS) {
+    // If we have previous stair info, create the first room in exactly the same position
+    if (prev_stair != NULL) {
+        Room first_room = prev_stair->room;
+        // Keep the exact same position
+        first_room.x = prev_stair->original_x;
+        first_room.y = prev_stair->original_y;
+        first_room.width = prev_stair->room.width;
+        first_room.height = prev_stair->room.height;
+        
+        current_level.rooms[current_level.room_count] = first_room;
+        draw_room(first_room);
+        place_pillars(first_room);
+        current_level.room_count++;
+        
+        // Set the spawn point to exactly where the stairs were
+        doors[0].x = prev_stair->stair_pos.x;
+        doors[0].y = prev_stair->stair_pos.y;
+    }
+
+    // Generate remaining rooms
+    while (current_level.room_count < MIN_ROOMS && attempts < MAX_ATTEMPTS) {
         Room new_room;
         new_room.width = MIN_ROOM_SIZE + (rand() % (MAX_ROOM_SIZE - MIN_ROOM_SIZE));
         new_room.height = MIN_ROOM_SIZE + (rand() % (MAX_ROOM_SIZE - MIN_ROOM_SIZE));
@@ -319,20 +410,18 @@ void generate_rooms() {
         new_room.x = 3 + (rand() % (MAP_WIDTH - new_room.width - 6));
         new_room.y = 3 + (rand() % (MAP_HEIGHT - new_room.height - 6));
 
-        if (!check_room_overlap(new_room, rooms, room_count)) {
-        rooms[room_count] = new_room;
-        draw_room(new_room);
-        place_pillars(new_room);
-        place_gold(rooms,room_count);
-        room_count++;
-    }
+        if (!check_room_overlap(new_room, current_level.rooms, current_level.room_count)) {
+            current_level.rooms[current_level.room_count] = new_room;
+            draw_room(new_room);
+            place_pillars(new_room);
+            current_level.room_count++;
+        }
         attempts++;
     }
 
     // Try to add additional rooms
     attempts = 0;
-    while (room_count < MAX_ROOMS && attempts < MAX_ATTEMPTS/2) {
-        // 40% chance to try adding another room
+    while (current_level.room_count < MAX_ROOMS && attempts < MAX_ATTEMPTS/2) {
         if (rand() % 100 < 40) {
             Room new_room;
             new_room.width = MIN_ROOM_SIZE + (rand() % (MAX_ROOM_SIZE - MIN_ROOM_SIZE));
@@ -341,24 +430,36 @@ void generate_rooms() {
             new_room.x = 3 + (rand() % (MAP_WIDTH - new_room.width - 6));
             new_room.y = 3 + (rand() % (MAP_HEIGHT - new_room.height - 6));
 
-            if (!check_room_overlap(new_room, rooms, room_count)) {
-                rooms[room_count] = new_room;
+            if (!check_room_overlap(new_room, current_level.rooms, current_level.room_count)) {
+                current_level.rooms[current_level.room_count] = new_room;
                 draw_room(new_room);
-                room_count++;
+                current_level.room_count++;
             }
         }
         attempts++;
     }
 
-    // If we couldn't generate minimum rooms, print error and exit
-    if (room_count < MIN_ROOMS) {
+    if (current_level.room_count < MIN_ROOMS) {
         endwin();
         fprintf(stderr, "Error: Could not generate minimum number of rooms\n");
         exit(1);
     }
 
-    create_corridors(rooms, room_count);
+    create_corridors(current_level.rooms, current_level.room_count);
     place_doors();
+    place_gold(current_level.rooms, current_level.room_count);
+    
+    if (prev_stair == NULL) {
+        // First level - place stairs in furthest room from start
+        Room furthest = find_furthest_room(current_level.rooms, current_level.room_count, 
+                                         (location){doors[0].x, doors[0].y});
+        location stair_pos = place_staircase(furthest);
+    } else {
+        // Subsequent levels - place stairs in furthest room from player
+        Room furthest = find_furthest_room(current_level.rooms, current_level.room_count, 
+                                         (location){player_pos->x, player_pos->y});
+        location stair_pos = place_staircase(furthest);
+    }
 }
 
 void draw_borders() {
@@ -392,74 +493,155 @@ int main() {
     noecho();
     keypad(stdscr, TRUE);
     curs_set(0);
+    
+    if (!has_colors()) {
+        endwin();
+        printf("Your terminal does not support color\n");
+        exit(1);
+    }
+    
+    start_color();
+    use_default_colors();  // This allows using the terminal's default background
+
+    // Define color pairs that will work well with purple background
+    init_pair(1, COLOR_BLACK, COLOR_WHITE);    // For messages
+    init_pair(2, COLOR_YELLOW, -1);            // Bright player color (-1 means default background)
+    init_pair(3, COLOR_WHITE, -1);             // For regular text
+    
     srand(time(NULL));
 
+    StairInfo* prev_stair = NULL;
     init_map();
-    location player = {doors[0].x, doors[0].y};
-    generate_rooms();
+    location player = {0, 0}; // Initialize player position
+    generate_rooms(prev_stair, &player);
 
     draw_borders();
     draw_map();
+    player.x = doors[0].x;  // Set initial player position to first door
+    player.y = doors[0].y;
+    attron(COLOR_PAIR(2));
     mvprintw(player.y, player.x, "@");
+    attroff(COLOR_PAIR(2));
     refresh();
 
     int score = 0;
+    int level = 1;  // Track level number
     int ch;
+    
     while ((ch = getch()) != 'q') {
         mvprintw(player.y, player.x, " ");
-        mvprintw(40,1,"                                      ");
-switch (ch) {
-    case KEY_UP:
-        if (player.y > 1 && map[player.y-1][player.x] != VERTICAL &&
-            map[player.y-1][player.x] != HORIZ && map[player.y-1][player.x] != PILLAR &&
-            (map[player.y-1][player.x] == FLOOR || map[player.y-1][player.x] == DOOR ||
-             map[player.y-1][player.x] == '='||map[player.y-1][player.x] == GOLD_SMALL||map[player.y-1][player.x] == GOLD_MEDIUM||map[player.y-1][player.x] == GOLD_LARGE))
-            player.y--;
-        break;
-    case KEY_DOWN:
-        if (player.y < MAP_HEIGHT - 2 && map[player.y+1][player.x] != VERTICAL &&
-            map[player.y+1][player.x] != HORIZ && map[player.y+1][player.x] != PILLAR &&
-            (map[player.y+1][player.x] == FLOOR || map[player.y+1][player.x] == DOOR ||
-             map[player.y+1][player.x] == '='||map[player.y+1][player.x] == GOLD_SMALL||map[player.y+1][player.x] == GOLD_MEDIUM||map[player.y+1][player.x] == GOLD_LARGE))
-            player.y++;
-        break;
-    case KEY_LEFT:
-        if (player.x > 1 && map[player.y][player.x-1] != VERTICAL &&
-            map[player.y][player.x-1] != HORIZ && map[player.y][player.x-1] != PILLAR &&
-            (map[player.y][player.x-1] == FLOOR || map[player.y][player.x-1] == DOOR ||
-             map[player.y][player.x-1] == '='||map[player.y][player.x-1] == GOLD_LARGE||map[player.y][player.x-1] == GOLD_MEDIUM||map[player.y][player.x-1] == GOLD_SMALL))
-            player.x--;
-        break;
-    case KEY_RIGHT:
-        if (player.x < MAP_WIDTH - 2 && map[player.y][player.x+1] != VERTICAL &&
-            map[player.y][player.x+1] != HORIZ && map[player.y][player.x+1] != PILLAR &&
-            (map[player.y][player.x+1] == FLOOR || map[player.y][player.x+1] == DOOR ||
-             map[player.y][player.x+1] == '='||map[player.y][player.x+1] == GOLD_SMALL||map[player.y][player.x+1] == GOLD_MEDIUM||map[player.y][player.x+1] == GOLD_LARGE))
-            player.x++;
-        break;
-}
-    if(map[player.y][player.x] == GOLD_SMALL) {
-        map[player.y][player.x] = FLOOR;
-        score += 1;
-        mvprintw(40, 1, "You found a small pile of gold! (+1)");
-    } else if(map[player.y][player.x] == GOLD_MEDIUM) {
-        map[player.y][player.x] = FLOOR;
-        score += 5;
-        mvprintw(40, 1, "You found a medium pile of gold! (+5)");
-    } else if(map[player.y][player.x] == GOLD_LARGE) {
-        map[player.y][player.x] = FLOOR;
-        score += 10;
-        mvprintw(40, 1, "You found a large pile of gold! (+10)");
-    }
-    
-    mvprintw(41, 1, "Score = %d", score);
+        mvprintw(40, 1, "                                      ");
 
+        switch (ch) {
+            case KEY_UP:
+                if (player.y > 1 && map[player.y-1][player.x] != VERTICAL &&
+                    map[player.y-1][player.x] != HORIZ && map[player.y-1][player.x] != PILLAR &&
+                    (map[player.y-1][player.x] == FLOOR || map[player.y-1][player.x] == DOOR ||
+                     map[player.y-1][player.x] == '=' || map[player.y-1][player.x] == GOLD_SMALL ||
+                     map[player.y-1][player.x] == GOLD_MEDIUM || map[player.y-1][player.x] == GOLD_LARGE ||
+                     map[player.y-1][player.x] == STAIR))
+                    player.y--;
+                break;
+            case KEY_DOWN:
+                if (player.y < MAP_HEIGHT - 2 && map[player.y+1][player.x] != VERTICAL &&
+                    map[player.y+1][player.x] != HORIZ && map[player.y+1][player.x] != PILLAR &&
+                    (map[player.y+1][player.x] == FLOOR || map[player.y+1][player.x] == DOOR ||
+                     map[player.y+1][player.x] == '=' || map[player.y+1][player.x] == GOLD_SMALL ||
+                     map[player.y+1][player.x] == GOLD_MEDIUM || map[player.y+1][player.x] == GOLD_LARGE ||
+                     map[player.y+1][player.x] == STAIR))
+                    player.y++;
+                break;
+            case KEY_LEFT:
+                if (player.x > 1 && map[player.y][player.x-1] != VERTICAL &&
+                    map[player.y][player.x-1] != HORIZ && map[player.y][player.x-1] != PILLAR &&
+                    (map[player.y][player.x-1] == FLOOR || map[player.y][player.x-1] == DOOR ||
+                     map[player.y][player.x-1] == '=' || map[player.y][player.x-1] == GOLD_SMALL ||
+                     map[player.y][player.x-1] == GOLD_MEDIUM || map[player.y][player.x-1] == GOLD_LARGE ||
+                     map[player.y][player.x-1] == STAIR))
+                    player.x--;
+                break;
+            case KEY_RIGHT:
+                if (player.x < MAP_WIDTH - 2 && map[player.y][player.x+1] != VERTICAL &&
+                    map[player.y][player.x+1] != HORIZ && map[player.y][player.x+1] != PILLAR &&
+                    (map[player.y][player.x+1] == FLOOR || map[player.y][player.x+1] == DOOR ||
+                     map[player.y][player.x+1] == '=' || map[player.y][player.x+1] == GOLD_SMALL ||
+                     map[player.y][player.x+1] == GOLD_MEDIUM || map[player.y][player.x+1] == GOLD_LARGE ||
+                     map[player.y][player.x+1] == STAIR))
+                    player.x++;
+                break;
+        }
+
+        if(map[player.y][player.x] == GOLD_SMALL) {
+            map[player.y][player.x] = FLOOR;
+            score += 1;
+            mvprintw(40, 1, "You found a small pile of gold! (+1)");
+        } else if(map[player.y][player.x] == GOLD_MEDIUM) {
+            map[player.y][player.x] = FLOOR;
+            score += 5;
+            mvprintw(40, 1, "You found a medium pile of gold! (+5)");
+        } else if(map[player.y][player.x] == GOLD_LARGE) {
+            map[player.y][player.x] = FLOOR;
+            score += 10;
+            mvprintw(40, 1, "You found a large pile of gold! (+10)");
+        }
+
+        if(map[player.y][player.x] == STAIR) {
+            mvprintw(40, 1, "Press ENTER to go to next level");
+            refresh();
+            int ch;
+            while ((ch = getch()) != '\n' && ch != 'q') {
+                // Wait for ENTER or q
+            }
+            if (ch != 'q') {
+                // Store current stair information before generating new level
+                StairInfo prev_level_stair;
+                prev_level_stair.stair_pos.x = player.x;
+                prev_level_stair.stair_pos.y = player.y;
+                
+                // Find the room containing the stairs
+                for (int i = 0; i < current_level.room_count; i++) {
+                    if (player.x >= current_level.rooms[i].x && 
+                        player.x <= current_level.rooms[i].x + current_level.rooms[i].width &&
+                        player.y >= current_level.rooms[i].y && 
+                        player.y <= current_level.rooms[i].y + current_level.rooms[i].height) {
+                        prev_level_stair.room = current_level.rooms[i];
+                        prev_level_stair.original_x = current_level.rooms[i].x;
+                        prev_level_stair.original_y = current_level.rooms[i].y;
+                        break;
+                    }
+                }
+
+                // Generate new level
+                clear();
+                init_map();
+                generate_rooms(&prev_level_stair, &player);
+                level++;
+                
+                // Place player at the stairs position
+                player.x = prev_level_stair.stair_pos.x;
+                player.y = prev_level_stair.stair_pos.y;
+                map[player.y][player.x] = FLOOR;  // Remove stair symbol at player position
+                
+                draw_borders();
+                draw_map();
+                mvprintw(41, 1, "Score = %d  Level = %d", score, level);
+                attron(COLOR_PAIR(2) | A_BOLD);
+                mvprintw(player.y, player.x, "@");
+                attroff(COLOR_PAIR(2) | A_BOLD);
+                refresh();
+            }
+        }
+
+        // Display level and score
+        mvprintw(41, 1, "Score = %d  Level = %d", score, level);
         draw_borders();
         draw_map();
+        attron(COLOR_PAIR(2) | A_BOLD);
         mvprintw(player.y, player.x, "@");
+        attroff(COLOR_PAIR(2) | A_BOLD);
         refresh();
     }
-
+    
     endwin();
     return 0;
 }

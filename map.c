@@ -199,7 +199,7 @@ void create_corridors(Room* rooms, int room_count) {
                 int current_x = start_x;
                 while (current_x != end_x) {
                     if (map[start_y][current_x] == ' ') {
-                        map[start_y][current_x] = '=';
+                        map[start_y][current_x] = '#';
                     }
                     current_x += (current_x < end_x) ? 1 : -1;
                 }
@@ -207,7 +207,7 @@ void create_corridors(Room* rooms, int room_count) {
                 int current_y = start_y;
                 while (current_y != end_y) {
                     if (map[current_y][end_x] == ' ') {
-                        map[current_y][end_x] = '=';
+                        map[current_y][end_x] = '#';
                     }
                     current_y += (current_y < end_y) ? 1 : -1;
                 }
@@ -216,7 +216,7 @@ void create_corridors(Room* rooms, int room_count) {
                 int current_y = start_y;
                 while (current_y != end_y) {
                     if (map[current_y][start_x] == ' ') {
-                        map[current_y][start_x] = '=';
+                        map[current_y][start_x] = '#';
                     }
                     current_y += (current_y < end_y) ? 1 : -1;
                 }
@@ -224,7 +224,7 @@ void create_corridors(Room* rooms, int room_count) {
                 int current_x = start_x;
                 while (current_x != end_x) {
                     if (map[end_y][current_x] == ' ') {
-                        map[end_y][current_x] = '=';
+                        map[end_y][current_x] = '#';
                     }
                     current_x += (current_x < end_x) ? 1 : -1;
                 }
@@ -493,7 +493,7 @@ int main() {
     noecho();
     keypad(stdscr, TRUE);
     curs_set(0);
-    
+    int color = 4; 
     if (!has_colors()) {
         endwin();
         printf("Your terminal does not support color\n");
@@ -506,7 +506,10 @@ int main() {
     // Define color pairs that will work well with purple background
     init_pair(1, COLOR_BLACK, COLOR_WHITE);    // For messages
     init_pair(2, COLOR_YELLOW, -1);            // Bright player color (-1 means default background)
-    init_pair(3, COLOR_WHITE, -1);             // For regular text
+    init_pair(3, COLOR_CYAN, -1);
+    init_pair(4, COLOR_MAGENTA,-1);
+    init_pair(5,COLOR_BLUE,-1);
+    init_pair(6, COLOR_WHITE, -1);             // For regular text
     
     srand(time(NULL));
 
@@ -519,7 +522,7 @@ int main() {
     draw_map();
     player.x = doors[0].x;  // Set initial player position to first door
     player.y = doors[0].y;
-    attron(COLOR_PAIR(2));
+    attron(COLOR_PAIR(color));
     mvprintw(player.y, player.x, "@");
     attroff(COLOR_PAIR(2));
     refresh();
@@ -625,7 +628,7 @@ int main() {
                 draw_borders();
                 draw_map();
                 mvprintw(41, 1, "Score = %d  Level = %d", score, level);
-                attron(COLOR_PAIR(2) | A_BOLD);
+                attron(COLOR_PAIR(color) | A_BOLD);
                 mvprintw(player.y, player.x, "@");
                 attroff(COLOR_PAIR(2) | A_BOLD);
                 refresh();
@@ -636,7 +639,7 @@ int main() {
         mvprintw(41, 1, "Score = %d  Level = %d", score, level);
         draw_borders();
         draw_map();
-        attron(COLOR_PAIR(2) | A_BOLD);
+        attron(COLOR_PAIR(color) | A_BOLD);
         mvprintw(player.y, player.x, "@");
         attroff(COLOR_PAIR(2) | A_BOLD);
         refresh();

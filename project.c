@@ -5,16 +5,18 @@
 #include <stdbool.h>
 #include <regex.h>
 #include <ctype.h>
+#include <time.h>
 
 typedef struct {
     char username[50];
     char password[50];
     char email[100];
     int score;
+    char last_signin[50];
 } User;
 
 // Global variables
-static int menu_y[] = {8, 9, 10, 11};  // Updated for 4 items
+static int menu_y[] = {8, 9, 10, 11};
 static const int menu_x = 20;
 static char *menu[] = {
     "SIGN IN",
@@ -27,20 +29,88 @@ static char *m_menu[] = {
     "SCORE"
 };
 static int selected = 0;
-static char current_user[50] = "";  // Added to store current user
-static bool is_logged_in = false;   // Added to track login state
+static char current_user[50] = "";
+static bool is_logged_in = false;
 
-// Function prototypes
-void draw_menu(void);
-void create_user(void);
-bool login_user(void);  // Changed return type to bool
-void main_menu(void);   // Modified parameter
+bool is_valid_password(const char *password) {
+    bool has_upper = false;
+    bool has_lower = false;
+    bool has_digit = false;
+    
+    for (int i = 0; password[i] != '\0'; i++) {
+        if (isupper(password[i])) has_upper = true;
+        if (islower(password[i])) has_lower = true;
+        if (isdigit(password[i])) has_digit = true;
+    }
+    
+    return has_upper && has_lower && has_digit;
+}
 
+int is_valid_email_format(const char *email, regex_t *regex) {
+    return regexec(regex, email, 0, NULL, 0) == 0;
+}
+
+int is_valid_email_length(const char *email) {
+    return strlen(email) <= 320;
+}
+
+int is_common_domain(const char *email) {
+    const char *common_domains[] = {
+        "gmail.com", "yahoo.com", "hotmail.com", "outlook.com"
+    };
+    const int domain_count = 4;
+    
+    char *at_pos = strchr(email, '@');
+    if (at_pos == NULL) return 0;
+    
+    for (int i = 0; i < domain_count; i++) {
+        if (strcasestr(at_pos + 1, common_domains[i]) != NULL) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void get_current_utc_time(char *buffer, size_t size) {
+    time_t now;
+    struct tm *tm_utc;
+    
+    time(&now);
+    tm_utc = gmtime(&now);
+    
+    snprintf(buffer, size, "%04d-%02d-%02d %02d:%02d:%02d UTC",
+             tm_utc->tm_year + 1900,
+             tm_utc->tm_mon + 1,
+             tm_utc->tm_mday,
+             tm_utc->tm_hour,
+             tm_utc->tm_min,
+             tm_utc->tm_sec);
+}
+
+void update_signin_time(const char *username) {
+    FILE *users = fopen("user_info.txt", "rb+");
+    if (users == NULL) return;
+
+    User temp_user;
+    char current_time[50];
+    get_current_utc_time(current_time, sizeof(current_time));
+    
+    while (fread(&temp_user, sizeof(User), 1, users) == 1) {
+        if (strcmp(temp_user.username, username) == 0) {
+            fseek(users, -sizeof(User), SEEK_CUR);
+            strncpy(temp_user.last_signin, current_time, sizeof(temp_user.last_signin) - 1);
+            temp_user.last_signin[sizeof(temp_user.last_signin) - 1] = '\0';
+            fwrite(&temp_user, sizeof(User), 1, users);
+            break;
+        }
+    }
+    fclose(users);
+}
 void draw_menu(void) {
     clear();
     mvprintw(4, menu_x - 5, "PLEASE SIGN IN FIRST(IF YOU ALREADY DID IT THEN LOGIN)!");
 
-    for (int i = 0; i < 2; i++) {  // Changed to 2 for initial menu
+    for (int i = 0; i < 2; i++) {
         if (i == selected && has_colors()) {
             attron(COLOR_PAIR(2));
         }
@@ -63,9 +133,8 @@ void draw_menu(void) {
 void main_menu(void) {
     clear();
     mvprintw(4, menu_x - 5, "WELCOME %s!", current_user);
-    refresh(); // Add refresh here to ensure it's displaying correctly
 
-    for (int i = 0; i < 4; i++) {  // Show all 4 main menu items
+    for (int i = 0; i < 4; i++) {
         if (i == selected && has_colors()) {
             attron(COLOR_PAIR(2));
         }
@@ -83,45 +152,6 @@ void main_menu(void) {
         }
     }
     refresh();
-}
-bool is_valid_password(const char *password) {
-    bool has_upper = false;
-    bool has_lower = false;
-    bool has_digit = false;
-    
-    // Check each character in the password
-    for (int i = 0; password[i] != '\0'; i++) {
-        if (isupper(password[i])) has_upper = true;
-        if (islower(password[i])) has_lower = true;
-        if (isdigit(password[i])) has_digit = true;
-    }
-    
-    return has_upper && has_lower && has_digit;
-}
-// Add these helper functions above create_user()
-int is_valid_email_format(const char *email, regex_t *regex) {
-    return regexec(regex, email, 0, NULL, 0) == 0;
-}
-
-int is_valid_email_length(const char *email) {
-    return strlen(email) <= 320;  // RFC 5321 max length
-}
-
-int is_common_domain(const char *email) {
-    const char *common_domains[] = {
-        "gmail.com", "yahoo.com", "hotmail.com", "outlook.com"
-    };
-    const int domain_count = 4;
-    
-    char *at_pos = strchr(email, '@');
-    if (at_pos == NULL) return 0;
-    
-    for (int i = 0; i < domain_count; i++) {
-        if (strcasestr(at_pos + 1, common_domains[i]) != NULL) {
-            return 1;
-        }
-    }
-    return 0;
 }
 
 void create_user(void) {
@@ -146,7 +176,6 @@ void create_user(void) {
     mvprintw(6, 2, "Username: ");
     getstr(new_user.username);
 
-// Replace the simple password input with this enhanced version
     bool valid_password = false;
     do {
         mvprintw(7, 2, "Password (must contain at least 1 uppercase, 1 lowercase, and 1 number): ");
@@ -165,14 +194,12 @@ void create_user(void) {
         }
     } while (!valid_password);
 
-    // Enhanced email validation
     int valid_email = 0;
     do {
         mvprintw(8, 2, "Email: ");
         clrtoeol();
         getstr(new_user.email);
         
-        // Check email length
         if (!is_valid_email_length(new_user.email)) {
             mvprintw(10, 2, "Email is too long! Maximum length is 320 characters.");
             refresh();
@@ -182,7 +209,6 @@ void create_user(void) {
             continue;
         }
         
-        // Check email format
         if (!is_valid_email_format(new_user.email, &regex)) {
             mvprintw(10, 2, "Invalid email format! Example: user@domain.com");
             refresh();
@@ -192,7 +218,6 @@ void create_user(void) {
             continue;
         }
         
-        // Warn about uncommon domains
         if (!is_common_domain(new_user.email)) {
             mvprintw(10, 2, "Warning: Uncommon email domain. Press 'y' to continue or any other key to retry.");
             refresh();
@@ -208,6 +233,12 @@ void create_user(void) {
     } while (!valid_email);
     
     new_user.score = 0;
+
+    // Initialize sign-in time
+    char current_time[50];
+    get_current_utc_time(current_time, sizeof(current_time));
+    strncpy(new_user.last_signin, current_time, sizeof(new_user.last_signin) - 1);
+    new_user.last_signin[sizeof(new_user.last_signin) - 1] = '\0';
 
     FILE *users = fopen("user_info.txt", "ab+");
     if (users == NULL) {
@@ -226,30 +257,22 @@ void create_user(void) {
             mvprintw(10, 2, "Username already exists!");
             break;
         }
-        // if (strcmp(old_user.email, new_user.email) == 0) {
-        //     valid = 0;
-        //     mvprintw(10, 2, "Email already registered!");
-        //     break;
-        // }
     }
 
     if (valid) {
         fwrite(&new_user, sizeof(User), 1, users);
         mvprintw(10, 2, "Account created successfully! Press any key to continue.");
         is_logged_in = true;
-        strncpy(current_user, new_user.username, sizeof(current_user) - 1); // Set the current user
+        strncpy(current_user, new_user.username, sizeof(current_user) - 1);
     }
     
     fclose(users);
     regfree(&regex);
     refresh();
-
     noecho();
     curs_set(0);
     getch();
 }
-
-
 bool login_user(void) {
     clear();
     echo();
@@ -265,7 +288,7 @@ bool login_user(void) {
     mvprintw(7, 2, "Password: ");
     getstr(password);
 
-    FILE *users = fopen("user_info.txt", "rb");
+    FILE *users = fopen("user_info.txt", "rb+");
     if (users == NULL) {
         mvprintw(10, 2, "No users found!");
         refresh();
@@ -281,13 +304,14 @@ bool login_user(void) {
             strcmp(temp_user.password, password) == 0) {
             found = true;
             strncpy(current_user, username, sizeof(current_user) - 1);
+            update_signin_time(username);
             break;
         }
     }
     fclose(users);
 
     if (found) {
-        mvprintw(10, 2, "Login successful! Score: %d", temp_user.score);
+        mvprintw(10, 2, "Login successful! Press any key to continue.");
     } else {
         mvprintw(10, 2, "Invalid username or password!");
     }
@@ -311,7 +335,7 @@ int main(void) {
         init_pair(2, COLOR_BLACK, COLOR_WHITE);
     }
 
-    draw_menu();  // Initial menu draw
+    draw_menu();
 
     int ch;
     while ((ch = getch()) != 'q') {
@@ -319,28 +343,28 @@ int main(void) {
             switch (ch) {
                 case KEY_UP:
                     selected = (selected > 0) ? selected - 1 : 1;
-                    draw_menu();  // Update menu only when not logged in
+                    draw_menu();
                     break;
                 case KEY_DOWN:
                     selected = (selected < 1) ? selected + 1 : 0;
-                    draw_menu();  // Update menu only when not logged in
+                    draw_menu();
                     break;
                 case '\n':
                     if (selected == 0) {
                         create_user();
                         if (is_logged_in) {
-                            selected = 0; // Reset selection for main menu
-                            main_menu(); // Draw main menu immediately after account creation
+                            selected = 0;
+                            main_menu();
                         } else {
-                            draw_menu(); // Redraw login menu if account creation failed
+                            draw_menu();
                         }
                     } else if (selected == 1) {
                         is_logged_in = login_user();
                         if (is_logged_in) {
-                            selected = 0;  // Reset selection for main menu
-                            main_menu();   // Draw main menu immediately after login
+                            selected = 0;
+                            main_menu();
                         } else {
-                            draw_menu();   // Redraw login menu if login failed
+                            draw_menu();
                         }
                     }
                     break;
@@ -349,14 +373,58 @@ int main(void) {
             switch (ch) {
                 case KEY_UP:
                     selected = (selected > 0) ? selected - 1 : 3;
-                    main_menu();  // Update main menu
+                    main_menu();
                     break;
                 case KEY_DOWN:
                     selected = (selected < 3) ? selected + 1 : 0;
-                    main_menu();  // Update main menu
+                    main_menu();
                     break;
                 case '\n':
-                    // Handle main menu selections here
+                    if(selected == 0){
+                        // new game
+                    }
+                    else if(selected == 1){
+                        //load game
+                    }
+                    else if(selected == 2){ //profile
+                        clear();
+                        
+                        do {
+                            FILE *users = fopen("user_info.txt", "rb");
+                            User temp_user;
+                            char signin_time[50] = "Not available";
+                            int user_score = 0;
+                            
+                            if (users != NULL) {
+                                while (fread(&temp_user, sizeof(User), 1, users) == 1) {
+                                    if (strcmp(temp_user.username, current_user) == 0) {
+                                        strncpy(signin_time, temp_user.last_signin, sizeof(signin_time) - 1);
+                                        signin_time[sizeof(signin_time) - 1] = '\0';
+                                        user_score = temp_user.score;
+                                        break;
+                                    }
+                                }
+                                fclose(users);
+                            }
+
+                            mvprintw(6, 5, "press b to go back");
+                            mvprintw(7, 5, "player name: %s", current_user);
+                            mvprintw(8, 5, "player score: %d", user_score);
+                            mvprintw(9, 5, "last sign in: %s", signin_time);
+                            mvprintw(10, 5, "rank:");
+                            refresh();
+                            
+                            char in = getch();
+                            if (in == 'b') {
+                                clear();
+                                main_menu();
+                                break;
+                            }
+                        } while (1);
+                    }
+                    else if(selected == 3){
+                        //score board
+                    }
                     break;
             }
         }

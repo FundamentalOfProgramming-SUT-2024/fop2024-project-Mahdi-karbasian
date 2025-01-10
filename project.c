@@ -13,7 +13,14 @@ typedef struct {
     char email[100];
     int score;
     char last_signin[50];
+    int played;
 } User;
+
+typedef struct {
+    char username[50];
+    int score;
+    int rank;
+} PlayerRank;
 
 // Global variables
 static int menu_y[] = {8, 9, 10, 11};
@@ -31,6 +38,21 @@ static char *m_menu[] = {
 static int selected = 0;
 static char current_user[50] = "";
 static bool is_logged_in = false;
+
+// Function prototypes
+void draw_menu(void);
+void main_menu(void);
+void create_user(void);
+bool login_user(void);
+void update_signin_time(const char *username);
+void get_current_utc_time(char *buffer, size_t size);
+int get_player_rank(const char *username);
+void display_scoreboard(void);
+bool is_valid_password(const char *password);
+int is_valid_email_format(const char *email, regex_t *regex);
+int is_valid_email_length(const char *email);
+int is_common_domain(const char *email);
+int compare_players(const void *a, const void *b);
 
 bool is_valid_password(const char *password) {
     bool has_upper = false;
@@ -87,25 +109,139 @@ void get_current_utc_time(char *buffer, size_t size) {
              tm_utc->tm_sec);
 }
 
+// Compare function for qsort (sorting in descending order by score)
+int compare_players(const void *a, const void *b) {
+    return ((PlayerRank *)b)->score - ((PlayerRank *)a)->score;
+}
 void update_signin_time(const char *username) {
     FILE *users = fopen("user_info.txt", "rb+");
     if (users == NULL) return;
 
     User temp_user;
-    char current_time[50];
-    get_current_utc_time(current_time, sizeof(current_time));
     
     while (fread(&temp_user, sizeof(User), 1, users) == 1) {
         if (strcmp(temp_user.username, username) == 0) {
-            fseek(users, -sizeof(User), SEEK_CUR);
-            strncpy(temp_user.last_signin, current_time, sizeof(temp_user.last_signin) - 1);
-            temp_user.last_signin[sizeof(temp_user.last_signin) - 1] = '\0';
-            fwrite(&temp_user, sizeof(User), 1, users);
+            // Check if this is the first sign in (last_signin is empty)
+            if (strlen(temp_user.last_signin) == 0) {
+                fseek(users, -sizeof(User), SEEK_CUR);
+                char current_time[50];
+                get_current_utc_time(current_time, sizeof(current_time));
+                strncpy(temp_user.last_signin, current_time, sizeof(temp_user.last_signin) - 1);
+                temp_user.last_signin[sizeof(temp_user.last_signin) - 1] = '\0';
+                fwrite(&temp_user, sizeof(User), 1, users);
+            }
             break;
         }
     }
     fclose(users);
 }
+
+// Function to get player's rank
+int get_player_rank(const char *username) {
+    FILE *users = fopen("user_info.txt", "rb");
+    if (users == NULL) return 0;
+
+    fseek(users, 0, SEEK_END);
+    long fileSize = ftell(users);
+    int userCount = fileSize / sizeof(User);
+    rewind(users);
+
+    PlayerRank *rankings = malloc(userCount * sizeof(PlayerRank));
+    if (rankings == NULL) {
+        fclose(users);
+        return 0;
+    }
+
+    User temp_user;
+    int i = 0;
+    while (fread(&temp_user, sizeof(User), 1, users) == 1) {
+        strncpy(rankings[i].username, temp_user.username, sizeof(rankings[i].username) - 1);
+        rankings[i].score = temp_user.score;
+        i++;
+    }
+
+    qsort(rankings, userCount, sizeof(PlayerRank), compare_players);
+
+    int rank = 0;
+    int currentRank = 1;
+    int prevScore = -1;
+    
+    for (i = 0; i < userCount; i++) {
+        if (prevScore != rankings[i].score) {
+            currentRank = i + 1;
+        }
+        if (strcmp(rankings[i].username, username) == 0) {
+            rank = currentRank;
+            break;
+        }
+        prevScore = rankings[i].score;
+    }
+
+    free(rankings);
+    fclose(users);
+    return rank;
+}
+
+void display_scoreboard(void) {
+    clear();
+    FILE *users = fopen("user_info.txt", "rb");
+    if (users == NULL) {
+        mvprintw(10, 5, "No users found!");
+        refresh();
+        getch();
+        return;
+    }
+
+    fseek(users, 0, SEEK_END);
+    long fileSize = ftell(users);
+    int userCount = fileSize / sizeof(User);
+    rewind(users);
+
+    PlayerRank *rankings = malloc(userCount * sizeof(PlayerRank));
+    if (rankings == NULL) {
+        fclose(users);
+        return;
+    }
+
+    User temp_user;
+    int i = 0;
+    while (fread(&temp_user, sizeof(User), 1, users) == 1) {
+        strncpy(rankings[i].username, temp_user.username, sizeof(rankings[i].username) - 1);
+        rankings[i].score = temp_user.score;
+        i++;
+    }
+
+    qsort(rankings, userCount, sizeof(PlayerRank), compare_players);
+
+    mvprintw(4, 5, "SCOREBOARD");
+    mvprintw(5, 5, "Rank  Username                Score");
+    mvprintw(6, 5, "------------------------------------");
+
+    int currentRank = 1;
+    int prevScore = -1;
+    for (i = 0; i < userCount && i < 10; i++) {
+        if (prevScore != rankings[i].score) {
+            currentRank = i + 1;
+        }
+        mvprintw(7 + i, 5, "%2d.   %-20s %5d", 
+                currentRank, 
+                rankings[i].username, 
+                rankings[i].score);
+        prevScore = rankings[i].score;
+    }
+
+    mvprintw(18, 5, "Press 'b' to go back");
+    refresh();
+
+    free(rankings);
+    fclose(users);
+
+    char ch;
+    while ((ch = getch()) != 'b');
+    clear();
+    main_menu();
+}
+
 void draw_menu(void) {
     clear();
     mvprintw(4, menu_x - 5, "PLEASE SIGN IN FIRST(IF YOU ALREADY DID IT THEN LOGIN)!");
@@ -129,7 +265,6 @@ void draw_menu(void) {
     }
     refresh();
 }
-
 void main_menu(void) {
     clear();
     mvprintw(4, menu_x - 5, "WELCOME %s!", current_user);
@@ -232,14 +367,16 @@ void create_user(void) {
         
     } while (!valid_email);
     
-    new_user.score = 0;
+new_user.score = 0;
+    new_user.played = 0;  // Initialize played games count
 
-    // Initialize sign-in time
+    // Get current time and set it as first sign-in time
     char current_time[50];
     get_current_utc_time(current_time, sizeof(current_time));
     strncpy(new_user.last_signin, current_time, sizeof(new_user.last_signin) - 1);
     new_user.last_signin[sizeof(new_user.last_signin) - 1] = '\0';
 
+    // Open file only once
     FILE *users = fopen("user_info.txt", "ab+");
     if (users == NULL) {
         mvprintw(10, 2, "Error opening user file!");
@@ -273,6 +410,7 @@ void create_user(void) {
     curs_set(0);
     getch();
 }
+
 bool login_user(void) {
     clear();
     echo();
@@ -394,6 +532,7 @@ int main(void) {
                             User temp_user;
                             char signin_time[50] = "Not available";
                             int user_score = 0;
+                            int user_rank = 0;
                             
                             if (users != NULL) {
                                 while (fread(&temp_user, sizeof(User), 1, users) == 1) {
@@ -406,12 +545,19 @@ int main(void) {
                                 }
                                 fclose(users);
                             }
-
-                            mvprintw(6, 5, "press b to go back");
-                            mvprintw(7, 5, "player name: %s", current_user);
-                            mvprintw(8, 5, "player score: %d", user_score);
-                            mvprintw(9, 5, "last sign in: %s", signin_time);
-                            mvprintw(10, 5, "rank:");
+                            use_default_colors();
+                            user_rank = get_player_rank(current_user);
+                            init_pair(1,COLOR_BLACK,COLOR_WHITE);
+                            mvprintw(6, 5, "press ");
+                            attron(COLOR_PAIR(1));
+                            printw("b");
+                            attroff(COLOR_PAIR(1));
+                            printw(" to go back");
+                            mvprintw(8, 5, "player name: %s", current_user);
+                            mvprintw(10, 5, "player score: %d", user_score);
+                            mvprintw(12, 5, "last sign in: %s", signin_time);
+                            mvprintw(14, 5, "rank: %d", user_rank);
+                            mvprintw(16,5,"gemes played:");
                             refresh();
                             
                             char in = getch();
@@ -423,7 +569,7 @@ int main(void) {
                         } while (1);
                     }
                     else if(selected == 3){
-                        //score board
+                        display_scoreboard();
                     }
                     break;
             }

@@ -35,6 +35,14 @@ static char *m_menu[] = {
     "PROFILE",
     "SCORE"
 };
+static char *new_game[]={
+    "START",
+    "SETTINGS"
+};
+static char *setting[]={
+    "DIFFICULTY = ",
+    "CHANGE COLOR"
+};
 static int selected = 0;
 static char current_user[50] = "";
 static bool is_logged_in = false;
@@ -288,6 +296,30 @@ void main_menu(void) {
     }
     refresh();
 }
+void n_game(void) {
+    clear();
+    mvprintw(4, menu_x - 5, "let's start a new game");
+
+    for (int i = 0; i < 2; i++) {  
+        if (i == selected && has_colors()) {
+            attron(COLOR_PAIR(2));
+        }
+
+        mvhline(menu_y[i], menu_x - 2, ' ', 22);
+
+        if (i == selected) {
+            mvprintw(menu_y[i], menu_x - 2, "->");
+        }
+
+        mvprintw(menu_y[i], menu_x, "%s", new_game[i]);
+
+        if (i == selected && has_colors()) {
+            attroff(COLOR_PAIR(2));
+        }
+    }
+    refresh();
+}
+
 
 void create_user(void) {
     clear();
@@ -518,8 +550,46 @@ int main(void) {
                     main_menu();
                     break;
                 case '\n':
-                    if(selected == 0){
-                        // new game
+                    if(selected == 0){ // new game
+    clear();
+    selected = 0;  // Reset selection for new menu
+    n_game();
+    bool in_new_game = true;
+    
+    while(in_new_game) {
+        int ch = getch();
+        switch (ch) {
+            case KEY_UP:
+                selected = (selected > 0) ? selected - 1 : 1;
+                n_game();
+                break;
+            case KEY_DOWN:
+                selected = (selected < 1) ? selected + 1 : 0;
+                n_game();
+                break;
+            case '\n':
+                if(selected == 0) {
+                    // Start game code here
+                    clear();
+                    mvprintw(10, 10, "Starting game...");
+                    refresh();
+                    getch();
+                } else if(selected == 1) {
+                    // Settings code here
+                    clear();
+                    mvprintw(10, 10, "Settings menu...");
+                    refresh();
+                    getch();
+                }
+                break;
+            case 'b':  // Add option to go back
+                in_new_game = false;
+                clear();
+                main_menu();
+                break;
+        }
+    }
+                    
                     }
                     else if(selected == 1){
                         //load game

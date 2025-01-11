@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include <time.h>
 #include <limits.h>
+#include <locale.h>
+#include <wchar.h>
 
 #define VERTICAL '|'
 #define HORIZ '_'
@@ -19,6 +21,7 @@
 #define TRAP_VISIBLE '^'   // Visible trap symbol (shown after triggering)
 #define TRAP_DAMAGE 10     // Damage dealt by traps
 #define MAX_HEALTH 100     // Maximum player health
+#define MACE L"⚒"
 
 #define MIN_ROOM_SIZE 4
 #define MAX_ROOM_SIZE 16
@@ -37,6 +40,7 @@ typedef struct {
     int y;
     int width;
     int height;
+    int room_type; //1=treasure 2=enchant 3=regular
 } Room;
 
 typedef struct {
@@ -136,10 +140,6 @@ void place_traps(Room* rooms, int room_count) {
     memset(trap_locations, 0, sizeof(trap_locations));
     
     for (int r = 0; r < room_count; r++) {
-        // Replace this line:
-        // if ((float)rand() / RAND_MAX > ROOM_TRAP_CHANCE) {
-        
-        // With this:
         if ((rand() % 100) > (ROOM_TRAP_CHANCE * 100)) {
             continue;
         }
@@ -147,13 +147,18 @@ void place_traps(Room* rooms, int room_count) {
         Room room = rooms[r];
         int traps_placed = 0;
         int attempts = 0;
+        const int MAX_ATTEMPTS = 20;
         
-        while (traps_placed < MAX_TRAPS_PER_ROOM && attempts < 20) {
+        while (traps_placed < MAX_TRAPS_PER_ROOM && attempts < MAX_ATTEMPTS) {
+            // Generate position inside room (excluding walls)
             int x = room.x + 2 + (rand() % (room.width - 3));
             int y = room.y + 2 + (rand() % (room.height - 3));
             
+            // Explicitly check if the position is a floor tile
             if (map[y][x] == FLOOR) {
+
                 bool is_suitable = true;
+                
                 // Check surrounding area for doors, stairs, gold, and other traps
                 for (int dy = -1; dy <= 1; dy++) {
                     for (int dx = -1; dx <= 1; dx++) {
@@ -164,7 +169,10 @@ void place_traps(Room* rooms, int room_count) {
                             nearby_tile == GOLD_SMALL ||
                             nearby_tile == GOLD_MEDIUM ||
                             nearby_tile == GOLD_LARGE ||
-                            trap_locations[y + dy][x + dx]) {
+                            nearby_tile == PILLAR ||
+                            trap_locations[y + dy][x + dx] ||
+                            nearby_tile == VERTICAL ||
+                            nearby_tile == HORIZ) {
                             is_suitable = false;
                             break;
                         }
@@ -455,6 +463,12 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
         current_level.rooms[current_level.room_count] = first_room;
         draw_room(first_room);
         place_pillars(first_room);
+        if(rand()%100 <80){
+        first_room.room_type = 3;
+        }
+        else {
+            first_room.room_type = 1;
+        }
         current_level.room_count++;
         
         // Set the spawn point to exactly where the stairs were
@@ -475,6 +489,15 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
             current_level.rooms[current_level.room_count] = new_room;
             draw_room(new_room);
             place_pillars(new_room);
+            if(rand()%100 <50){
+        new_room.room_type = 3;
+        }
+        else if (rand() % 100 <80) {
+            new_room.room_type = 1;
+        }
+        else{
+            new_room.room_type = 2;
+        }
             current_level.room_count++;
         }
         attempts++;
@@ -494,6 +517,15 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
             if (!check_room_overlap(new_room, current_level.rooms, current_level.room_count)) {
                 current_level.rooms[current_level.room_count] = new_room;
                 draw_room(new_room);
+                      if(rand()%100 <50){
+                      new_room.room_type = 3;
+                      }
+                       else if (rand() % 100 <80) {
+                       new_room.room_type = 1;
+                       }
+                       else{
+                      new_room.room_type = 2;
+                       }
                 current_level.room_count++;
             }
         }
@@ -508,7 +540,6 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
 
     create_corridors(current_level.rooms, current_level.room_count);
     place_doors();
-    place_traps(current_level.rooms, current_level.room_count);
     place_gold(current_level.rooms, current_level.room_count);
     
     if (prev_stair == NULL) {
@@ -522,6 +553,7 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
                                          (location){player_pos->x, player_pos->y});
         location stair_pos = place_staircase(furthest);
     }
+    place_traps(current_level.rooms, current_level.room_count);
 }
 
 void draw_borders() {
@@ -550,6 +582,47 @@ void draw_map() {
     }
 }
 
+int get_current_room_type(location player) {
+    for (int i = 0; i < current_level.room_count; i++) {
+        Room room = current_level.rooms[i];
+        if (player.x >= room.x && player.x <= room.x + room.width &&
+            player.y >= room.y && player.y <= room.y + room.height) {
+            return room.room_type;
+        }
+    }
+    return 0; // Return 0 if player is in a corridor or outside any room
+}
+
+void update_status_line(int score, int level, int player_health, location player, time_t start_time) {
+    int room_type = get_current_room_type(player);
+    const char* room_name;
+    attron(COLOR_PAIR(3)); // Use white color for status
+
+    switch(room_type) {
+        case 1:
+            room_name = "Treasure Room";
+            break;
+        case 2:
+            room_name = "Enchant Room";
+            break;
+        case 3:
+            room_name = "Regular Room";
+            break;
+        default:
+            room_name = "Corridor";
+    }
+
+    time_t current_time = time(NULL);
+    int elapsed_time = (int)difftime(current_time, start_time);
+    int minutes = elapsed_time / 60;
+    int seconds = elapsed_time % 60;
+
+    mvprintw(41, 1, "Score: %d | Level: %d | Health: %d | Room: %s | Time: %02d:%02d | User: %s", 
+             score, level, player_health, room_name, minutes, seconds, "mahdi200584");
+    
+    attroff(COLOR_PAIR(3));
+}
+
 int main() {
     initscr();
     memset(trap_locations, 0, sizeof(trap_locations));
@@ -574,6 +647,13 @@ int main() {
     init_pair(4, COLOR_RED, -1);               // For traps and damage messages
     
     srand(time(NULL));
+    time_t game_start_time = time(NULL);
+
+    // Get current date and time
+    time_t now = time(NULL);
+    struct tm *tm_struct = gmtime(&now);
+    char datetime[26];
+    strftime(datetime, sizeof(datetime), "%Y-%m-%d %H:%M:%S", tm_struct);
 
     StairInfo* prev_stair = NULL;
     init_map();
@@ -591,12 +671,17 @@ int main() {
     attron(COLOR_PAIR(2));
     mvprintw(player.y, player.x, "@");
     attroff(COLOR_PAIR(2));
-    refresh();
 
     int score = 0;
     int level = 1;  // Track level number
+
+    // Display initial status
+    mvprintw(42, 1, "Date/Time (UTC): %s", datetime);
+    mvprintw(43, 1, "User: mahdi200584");
+    update_status_line(score, level, player_health, player, game_start_time);
+    refresh();
+
     int ch;
-    
     while ((ch = getch()) != 'q') {
         mvprintw(player.y, player.x, " ");
         mvprintw(40, 1, "                                      ");
@@ -664,11 +749,14 @@ int main() {
 
         // Check for player death
         if (player_health <= 0) {
+            clear();
             attron(COLOR_PAIR(4) | A_BOLD);
-            mvprintw(20, MAP_WIDTH/2 - 5, "GAME OVER!");
+            mvprintw(20, MAP_WIDTH/2 - 3, "GAME OVER!");
             attroff(COLOR_PAIR(4) | A_BOLD);
+            mvprintw(22,MAP_WIDTH/2 - 5, "YOUR SCORE:%d",score);
             refresh();
-            napms(2000);  // Wait 2 seconds
+            getch();
+            //napms(2000);  // Wait 2 seconds
             break;  // Exit the game loop
         }
 
@@ -713,7 +801,9 @@ int main() {
                 
                 draw_borders();
                 draw_map();
-                mvprintw(41, 1, "Score = %d  Level = %d  Health = %d", score, level, player_health);
+                mvprintw(42, 1, "Date/Time (UTC): %s", datetime);
+                mvprintw(43, 1, "User: mahdi200584");
+                update_status_line(score, level, player_health, player, game_start_time);
                 attron(COLOR_PAIR(2) | A_BOLD);
                 mvprintw(player.y, player.x, "@");
                 attroff(COLOR_PAIR(2) | A_BOLD);
@@ -721,26 +811,30 @@ int main() {
             }
         }
 
-        // Display level, score, and health
-        mvprintw(41, 1, "Score = %d  Level = %d  Health = %d", score, level, player_health);
+        // Update status lines
+        update_status_line(score, level, player_health, player, game_start_time);
         draw_borders();
         draw_map();
 
         // Draw revealed traps
         for (int y = 0; y < MAP_HEIGHT; y++) {
-    for (int x = 0; x < MAP_WIDTH; x++) {
-        if (trap_locations[y][x] && revealed_traps[y][x]) {
-            attron(COLOR_PAIR(4));
-            mvprintw(y, x, "%c", TRAP_VISIBLE);
-            attroff(COLOR_PAIR(4));
+            for (int x = 0; x < MAP_WIDTH; x++) {
+                if (trap_locations[y][x] && revealed_traps[y][x]) {
+                    attron(COLOR_PAIR(4));
+                    mvprintw(y, x, "%c", TRAP_VISIBLE);
+                    attroff(COLOR_PAIR(4));
+                }
+            }
         }
-    }
-}
 
         // Draw player
         attron(COLOR_PAIR(2) | A_BOLD);
         mvprintw(player.y, player.x, "@");
         attroff(COLOR_PAIR(2) | A_BOLD);
+
+        // Refresh the static info
+        mvprintw(42, 1, "Date/Time (UTC): %s", datetime);
+        mvprintw(43, 1, "User: mahdi200584");
         refresh();
     }
     

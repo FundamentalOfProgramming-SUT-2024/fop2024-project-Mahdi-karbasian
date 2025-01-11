@@ -15,6 +15,10 @@
 #define GOLD_MEDIUM '$'   // 5 gold
 #define GOLD_LARGE 'G'    // 10 gold
 #define STAIR '<'
+#define TRAP_HIDDEN '.'    // Hidden trap symbol (will not be displayed until triggered)
+#define TRAP_VISIBLE '^'   // Visible trap symbol (shown after triggering)
+#define TRAP_DAMAGE 10     // Damage dealt by traps
+#define MAX_HEALTH 100     // Maximum player health
 
 #define MIN_ROOM_SIZE 4
 #define MAX_ROOM_SIZE 16
@@ -53,6 +57,9 @@ char map[MAP_HEIGHT][MAP_WIDTH];
 location spawn;
 int i = 0;
 location doors[MAX_ROOMS * 2];
+int player_health = MAX_HEALTH;
+char revealed_traps[MAP_HEIGHT][MAP_WIDTH] = {0}; // Tracks revealed traps
+bool trap_locations[MAP_HEIGHT][MAP_WIDTH] = {{false}};  // Tracks where traps are
 
 void init_map() {
     for (int y = 0; y < MAP_HEIGHT; y++) {
@@ -119,6 +126,60 @@ Room find_furthest_room(Room* rooms, int room_count, location start_pos) {
     }
     
     return furthest_room;
+}
+
+void place_traps(Room* rooms, int room_count) {
+    const float ROOM_TRAP_CHANCE = 0.5f;  // 50% chance for a room to have traps
+    const int MAX_TRAPS_PER_ROOM = 3;     // Maximum number of traps per room
+    
+    // Clear trap locations array
+    memset(trap_locations, 0, sizeof(trap_locations));
+    
+    for (int r = 0; r < room_count; r++) {
+        // Replace this line:
+        // if ((float)rand() / RAND_MAX > ROOM_TRAP_CHANCE) {
+        
+        // With this:
+        if ((rand() % 100) > (ROOM_TRAP_CHANCE * 100)) {
+            continue;
+        }
+
+        Room room = rooms[r];
+        int traps_placed = 0;
+        int attempts = 0;
+        
+        while (traps_placed < MAX_TRAPS_PER_ROOM && attempts < 20) {
+            int x = room.x + 2 + (rand() % (room.width - 3));
+            int y = room.y + 2 + (rand() % (room.height - 3));
+            
+            if (map[y][x] == FLOOR) {
+                bool is_suitable = true;
+                // Check surrounding area for doors, stairs, gold, and other traps
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dx = -1; dx <= 1; dx++) {
+                        char nearby_tile = map[y + dy][x + dx];
+                        if (nearby_tile == DOOR || 
+                            nearby_tile == '=' || 
+                            nearby_tile == STAIR || 
+                            nearby_tile == GOLD_SMALL ||
+                            nearby_tile == GOLD_MEDIUM ||
+                            nearby_tile == GOLD_LARGE ||
+                            trap_locations[y + dy][x + dx]) {
+                            is_suitable = false;
+                            break;
+                        }
+                    }
+                    if (!is_suitable) break;
+                }
+                
+                if (is_suitable) {
+                    trap_locations[y][x] = true;
+                    traps_placed++;
+                }
+            }
+            attempts++;
+        }
+    }
 }
 
 location place_staircase(Room room) {
@@ -327,7 +388,7 @@ void place_gold(Room* rooms, int room_count) {
     const int GOLD_PER_ROOM = 2;     // Number of gold piles per room
     
     for (int r = 0; r < room_count; r++) {
-        if ((float)rand() / RAND_MAX > ROOM_CHANCE) {
+        if ((rand() % 100) > (ROOM_CHANCE * 100)) {
             continue;
         }
 
@@ -447,6 +508,7 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
 
     create_corridors(current_level.rooms, current_level.room_count);
     place_doors();
+    place_traps(current_level.rooms, current_level.room_count);
     place_gold(current_level.rooms, current_level.room_count);
     
     if (prev_stair == NULL) {
@@ -490,6 +552,8 @@ void draw_map() {
 
 int main() {
     initscr();
+    memset(trap_locations, 0, sizeof(trap_locations));
+    memset(revealed_traps, 0, sizeof(revealed_traps));
     noecho();
     keypad(stdscr, TRUE);
     curs_set(0);
@@ -507,12 +571,17 @@ int main() {
     init_pair(1, COLOR_BLACK, COLOR_WHITE);    // For messages
     init_pair(2, COLOR_YELLOW, -1);            // Bright player color (-1 means default background)
     init_pair(3, COLOR_WHITE, -1);             // For regular text
+    init_pair(4, COLOR_RED, -1);               // For traps and damage messages
     
     srand(time(NULL));
 
     StairInfo* prev_stair = NULL;
     init_map();
+    memset(revealed_traps, 0, sizeof(revealed_traps));
+    
     location player = {0, 0}; // Initialize player position
+    player_health = MAX_HEALTH;
+    
     generate_rooms(prev_stair, &player);
 
     draw_borders();
@@ -534,55 +603,73 @@ int main() {
 
         switch (ch) {
             case KEY_UP:
-                if (player.y > 1 && map[player.y-1][player.x] != VERTICAL &&
-                    map[player.y-1][player.x] != HORIZ && map[player.y-1][player.x] != PILLAR &&
-                    (map[player.y-1][player.x] == FLOOR || map[player.y-1][player.x] == DOOR ||
-                     map[player.y-1][player.x] == '=' || map[player.y-1][player.x] == GOLD_SMALL ||
-                     map[player.y-1][player.x] == GOLD_MEDIUM || map[player.y-1][player.x] == GOLD_LARGE ||
-                     map[player.y-1][player.x] == STAIR))
-                    player.y--;
-                break;
             case KEY_DOWN:
-                if (player.y < MAP_HEIGHT - 2 && map[player.y+1][player.x] != VERTICAL &&
-                    map[player.y+1][player.x] != HORIZ && map[player.y+1][player.x] != PILLAR &&
-                    (map[player.y+1][player.x] == FLOOR || map[player.y+1][player.x] == DOOR ||
-                     map[player.y+1][player.x] == '=' || map[player.y+1][player.x] == GOLD_SMALL ||
-                     map[player.y+1][player.x] == GOLD_MEDIUM || map[player.y+1][player.x] == GOLD_LARGE ||
-                     map[player.y+1][player.x] == STAIR))
-                    player.y++;
-                break;
             case KEY_LEFT:
-                if (player.x > 1 && map[player.y][player.x-1] != VERTICAL &&
-                    map[player.y][player.x-1] != HORIZ && map[player.y][player.x-1] != PILLAR &&
-                    (map[player.y][player.x-1] == FLOOR || map[player.y][player.x-1] == DOOR ||
-                     map[player.y][player.x-1] == '=' || map[player.y][player.x-1] == GOLD_SMALL ||
-                     map[player.y][player.x-1] == GOLD_MEDIUM || map[player.y][player.x-1] == GOLD_LARGE ||
-                     map[player.y][player.x-1] == STAIR))
-                    player.x--;
-                break;
             case KEY_RIGHT:
-                if (player.x < MAP_WIDTH - 2 && map[player.y][player.x+1] != VERTICAL &&
-                    map[player.y][player.x+1] != HORIZ && map[player.y][player.x+1] != PILLAR &&
-                    (map[player.y][player.x+1] == FLOOR || map[player.y][player.x+1] == DOOR ||
-                     map[player.y][player.x+1] == '=' || map[player.y][player.x+1] == GOLD_SMALL ||
-                     map[player.y][player.x+1] == GOLD_MEDIUM || map[player.y][player.x+1] == GOLD_LARGE ||
-                     map[player.y][player.x+1] == STAIR))
-                    player.x++;
+                {
+                    int new_x = player.x;
+                    int new_y = player.y;
+                    
+                    switch (ch) {
+                        case KEY_UP:    new_y--; break;
+                        case KEY_DOWN:  new_y++; break;
+                        case KEY_LEFT:  new_x--; break;
+                        case KEY_RIGHT: new_x++; break;
+                    }
+                    
+                    // Check if move is valid
+                    if (new_y > 0 && new_y < MAP_HEIGHT - 1 && new_x > 0 && new_x < MAP_WIDTH - 1 &&
+                        map[new_y][new_x] != VERTICAL && map[new_y][new_x] != HORIZ && 
+                        map[new_y][new_x] != PILLAR &&
+                        (map[new_y][new_x] == FLOOR || map[new_y][new_x] == DOOR ||
+                         map[new_y][new_x] == '=' || map[new_y][new_x] == GOLD_SMALL ||
+                         map[new_y][new_x] == GOLD_MEDIUM || map[new_y][new_x] == GOLD_LARGE ||
+                         map[new_y][new_x] == STAIR || map[new_y][new_x] == TRAP_HIDDEN)) {
+                        
+                        // Clear old position
+                        mvprintw(player.y, player.x, " ");
+                        
+                        // Update player position
+                        player.x = new_x;
+                        player.y = new_y;
+                        
+                        // Check for trap
+                        if (trap_locations[player.y][player.x] && !revealed_traps[player.y][player.x]) {
+                            player_health -= TRAP_DAMAGE;
+                            revealed_traps[player.y][player.x] = 1;
+                            map[player.y][player.x] = TRAP_VISIBLE;
+                            
+                            attron(COLOR_PAIR(4) | A_BOLD);
+                            mvprintw(40, 1, "You stepped on a trap! -%d HP", TRAP_DAMAGE);
+                            attroff(COLOR_PAIR(4) | A_BOLD);
+                        }
+                        // Check for gold collection
+                        else if (map[player.y][player.x] == GOLD_SMALL) {
+                            map[player.y][player.x] = FLOOR;
+                            score += 1;
+                            mvprintw(40, 1, "You found a small pile of gold! (+1)");
+                        } else if (map[player.y][player.x] == GOLD_MEDIUM) {
+                            map[player.y][player.x] = FLOOR;
+                            score += 5;
+                            mvprintw(40, 1, "You found a medium pile of gold! (+5)");
+                        } else if (map[player.y][player.x] == GOLD_LARGE) {
+                            map[player.y][player.x] = FLOOR;
+                            score += 10;
+                            mvprintw(40, 1, "You found a large pile of gold! (+10)");
+                        }
+                    }
+                }
                 break;
         }
 
-        if(map[player.y][player.x] == GOLD_SMALL) {
-            map[player.y][player.x] = FLOOR;
-            score += 1;
-            mvprintw(40, 1, "You found a small pile of gold! (+1)");
-        } else if(map[player.y][player.x] == GOLD_MEDIUM) {
-            map[player.y][player.x] = FLOOR;
-            score += 5;
-            mvprintw(40, 1, "You found a medium pile of gold! (+5)");
-        } else if(map[player.y][player.x] == GOLD_LARGE) {
-            map[player.y][player.x] = FLOOR;
-            score += 10;
-            mvprintw(40, 1, "You found a large pile of gold! (+10)");
+        // Check for player death
+        if (player_health <= 0) {
+            attron(COLOR_PAIR(4) | A_BOLD);
+            mvprintw(20, MAP_WIDTH/2 - 5, "GAME OVER!");
+            attroff(COLOR_PAIR(4) | A_BOLD);
+            refresh();
+            napms(2000);  // Wait 2 seconds
+            break;  // Exit the game loop
         }
 
         if(map[player.y][player.x] == STAIR) {
@@ -614,6 +701,8 @@ int main() {
                 // Generate new level
                 clear();
                 init_map();
+                memset(trap_locations, 0, sizeof(trap_locations));
+                memset(revealed_traps, 0, sizeof(revealed_traps));
                 generate_rooms(&prev_level_stair, &player);
                 level++;
                 
@@ -624,7 +713,7 @@ int main() {
                 
                 draw_borders();
                 draw_map();
-                mvprintw(41, 1, "Score = %d  Level = %d", score, level);
+                mvprintw(41, 1, "Score = %d  Level = %d  Health = %d", score, level, player_health);
                 attron(COLOR_PAIR(2) | A_BOLD);
                 mvprintw(player.y, player.x, "@");
                 attroff(COLOR_PAIR(2) | A_BOLD);
@@ -632,10 +721,23 @@ int main() {
             }
         }
 
-        // Display level and score
-        mvprintw(41, 1, "Score = %d  Level = %d", score, level);
+        // Display level, score, and health
+        mvprintw(41, 1, "Score = %d  Level = %d  Health = %d", score, level, player_health);
         draw_borders();
         draw_map();
+
+        // Draw revealed traps
+        for (int y = 0; y < MAP_HEIGHT; y++) {
+    for (int x = 0; x < MAP_WIDTH; x++) {
+        if (trap_locations[y][x] && revealed_traps[y][x]) {
+            attron(COLOR_PAIR(4));
+            mvprintw(y, x, "%c", TRAP_VISIBLE);
+            attroff(COLOR_PAIR(4));
+        }
+    }
+}
+
+        // Draw player
         attron(COLOR_PAIR(2) | A_BOLD);
         mvprintw(player.y, player.x, "@");
         attroff(COLOR_PAIR(2) | A_BOLD);

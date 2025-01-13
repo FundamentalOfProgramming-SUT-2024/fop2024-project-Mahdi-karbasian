@@ -22,6 +22,7 @@
 #define TRAP_DAMAGE 10     // Damage dealt by traps
 #define MAX_HEALTH 100     // Maximum player health
 #define MACE L"⚒"
+#define FOOD '8'
 
 #define MIN_ROOM_SIZE 4
 #define MAX_ROOM_SIZE 16
@@ -268,7 +269,7 @@ void create_corridors(Room* rooms, int room_count) {
                 int current_x = start_x;
                 while (current_x != end_x) {
                     if (map[start_y][current_x] == ' ') {
-                        map[start_y][current_x] = '=';
+                        map[start_y][current_x] = '#';
                     }
                     current_x += (current_x < end_x) ? 1 : -1;
                 }
@@ -276,7 +277,7 @@ void create_corridors(Room* rooms, int room_count) {
                 int current_y = start_y;
                 while (current_y != end_y) {
                     if (map[current_y][end_x] == ' ') {
-                        map[current_y][end_x] = '=';
+                        map[current_y][end_x] = '#';
                     }
                     current_y += (current_y < end_y) ? 1 : -1;
                 }
@@ -285,7 +286,7 @@ void create_corridors(Room* rooms, int room_count) {
                 int current_y = start_y;
                 while (current_y != end_y) {
                     if (map[current_y][start_x] == ' ') {
-                        map[current_y][start_x] = '=';
+                        map[current_y][start_x] = '#';
                     }
                     current_y += (current_y < end_y) ? 1 : -1;
                 }
@@ -293,7 +294,7 @@ void create_corridors(Room* rooms, int room_count) {
                 int current_x = start_x;
                 while (current_x != end_x) {
                     if (map[end_y][current_x] == ' ') {
-                        map[end_y][current_x] = '=';
+                        map[end_y][current_x] = '#';
                     }
                     current_x += (current_x < end_x) ? 1 : -1;
                 }
@@ -305,7 +306,7 @@ void create_corridors(Room* rooms, int room_count) {
 void place_doors() {
     for (int y = 1; y < MAP_HEIGHT - 1; y++) {
         for (int x = 1; x < MAP_WIDTH - 1; x++) {
-            if (map[y][x] == '=') {
+            if (map[y][x] == '#') {
                 bool is_corner = false;
 
                 if ((map[y-1][x-1] == HORIZ && map[y][x-1] == VERTICAL) ||
@@ -444,6 +445,54 @@ void place_gold(Room* rooms, int room_count) {
     }
 }
 
+void place_food(Room* rooms, int room_count) {
+    const float ROOM_CHANCE = 0.7f;  // 70% chance for a room to have food
+    const int GOLD_PER_ROOM = 2;     // Number of food
+    
+    for (int r = 0; r < room_count; r++) {
+        if ((rand() % 100) > (ROOM_CHANCE * 100)) {
+            continue;
+        }
+
+        Room room = rooms[r];
+        int food_placed = 0;
+        int attempts = 0;
+        
+        while (food_placed < GOLD_PER_ROOM && attempts < 20) {
+            int x = room.x + 2 + (rand() % (room.width - 3));
+            int y = room.y + 2 + (rand() % (room.height - 3));
+            
+            if (map[y][x] == FLOOR) {
+                bool is_suitable = true;
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dx = -1; dx <= 1; dx++) {
+                        char nearby_tile = map[y + dy][x + dx];
+                        if (nearby_tile == DOOR || 
+                            nearby_tile == '=' || 
+                            nearby_tile == PILLAR || 
+                            nearby_tile == GOLD_SMALL ||
+                            nearby_tile == GOLD_MEDIUM ||
+                            nearby_tile == GOLD_LARGE) {
+                            is_suitable = false;
+                            break;
+                        }
+                    }
+                    if (!is_suitable) break;
+                }
+                
+                if (is_suitable) {
+                    int gold_type = rand() % 100;
+                    if (gold_type < 60) {          
+                        map[y][x] = FOOD;
+                    }
+                    food_placed++;
+                }
+            }
+            attempts++;
+        }
+    }
+}
+
 void generate_rooms(StairInfo* prev_stair, location* player_pos) {
     current_level.room_count = 0;
     i = 0;
@@ -541,7 +590,7 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
     create_corridors(current_level.rooms, current_level.room_count);
     place_doors();
     place_gold(current_level.rooms, current_level.room_count);
-    
+    place_food(current_level.rooms, current_level.room_count);
     if (prev_stair == NULL) {
         // First level - place stairs in furthest room from start
         Room furthest = find_furthest_room(current_level.rooms, current_level.room_count, 
@@ -707,9 +756,9 @@ int main() {
                         map[new_y][new_x] != VERTICAL && map[new_y][new_x] != HORIZ && 
                         map[new_y][new_x] != PILLAR &&
                         (map[new_y][new_x] == FLOOR || map[new_y][new_x] == DOOR ||
-                         map[new_y][new_x] == '=' || map[new_y][new_x] == GOLD_SMALL ||
+                         map[new_y][new_x] == '#' || map[new_y][new_x] == GOLD_SMALL ||
                          map[new_y][new_x] == GOLD_MEDIUM || map[new_y][new_x] == GOLD_LARGE ||
-                         map[new_y][new_x] == STAIR || map[new_y][new_x] == TRAP_HIDDEN)) {
+                         map[new_y][new_x] == STAIR || map[new_y][new_x] == TRAP_HIDDEN ||map[new_y][new_x] == FOOD)) {
                         
                         // Clear old position
                         mvprintw(player.y, player.x, " ");
@@ -742,6 +791,17 @@ int main() {
                             score += 10;
                             mvprintw(40, 1, "You found a large pile of gold! (+10)");
                         }
+                        //check for food
+                        
+                        else if (map[player.y][player.x] == FOOD) {
+                            map[player.y][player.x] = FLOOR;
+                            if(player_health < 100){
+                            player_health += 10;
+                            mvprintw(40, 1, "You found food! (+10)");
+                            }
+                            else
+                            mvprintw(40, 1, "Already at full health!");
+                        }
                     }
                 }
                 break;
@@ -755,8 +815,8 @@ int main() {
             attroff(COLOR_PAIR(4) | A_BOLD);
             mvprintw(22,MAP_WIDTH/2 - 5, "YOUR SCORE:%d",score);
             refresh();
+            napms(2000);  // Wait 2 seconds
             getch();
-            //napms(2000);  // Wait 2 seconds
             break;  // Exit the game loop
         }
 

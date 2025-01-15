@@ -14,8 +14,8 @@
 #define FLOOR '.'
 #define PILLAR 'O'
 #define GOLD_SMALL '*'    // 1 gold
-#define GOLD_MEDIUM '$'   // 5 gold
-#define GOLD_LARGE 'G'    // 10 gold
+#define GOLD_MEDIUM '*'   // 5 gold
+#define GOLD_LARGE '*'    // 10 gold
 #define STAIR '<'
 #define TRAP_HIDDEN '.'    // Hidden trap symbol (will not be displayed until triggered)
 #define TRAP_VISIBLE '^'   // Visible trap symbol (shown after triggering)
@@ -65,11 +65,12 @@ location doors[MAX_ROOMS * 2];
 int player_health = MAX_HEALTH;
 char revealed_traps[MAP_HEIGHT][MAP_WIDTH] = {0}; // Tracks revealed traps
 bool trap_locations[MAP_HEIGHT][MAP_WIDTH] = {{false}};  // Tracks where traps are
-
+int gold_values[MAP_HEIGHT][MAP_WIDTH] = {{0}};
 void init_map() {
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
             map[y][x] = ' ';
+            gold_values[y][x] = 0;  // Initialize gold values
         }
     }
 }
@@ -95,12 +96,30 @@ bool check_room_overlap(Room new_room, Room* rooms, int room_count) {
 }
 
 void draw_room(Room room) {
+    // Set color based on room type
+    int color_pair;
+    switch(room.room_type) {
+        case 1: // Treasure room
+            color_pair = 5;
+            break;
+        case 2: // Enchant room
+            color_pair = 7;
+            break;
+        default: // Regular room
+            color_pair = 6;
+            break;
+    }
+    
+    attron(COLOR_PAIR(color_pair));
+    
+    // Draw floor
     for (int y = room.y + 1; y < room.y + room.height; y++) {
         for (int x = room.x + 1; x < room.x + room.width; x++) {
             map[y][x] = FLOOR;
         }
     }
 
+    // Draw walls
     for (int x = room.x; x <= room.x + room.width; x++) {
         map[room.y][x] = HORIZ;
         map[room.y + room.height][x] = HORIZ;
@@ -110,6 +129,8 @@ void draw_room(Room room) {
         map[y][room.x] = VERTICAL;
         map[y][room.x + room.width] = VERTICAL;
     }
+    
+    attroff(COLOR_PAIR(color_pair));
 }
 
 Room find_furthest_room(Room* rooms, int room_count, location start_pos) {
@@ -134,17 +155,27 @@ Room find_furthest_room(Room* rooms, int room_count, location start_pos) {
 }
 
 void place_traps(Room* rooms, int room_count) {
-    const float ROOM_TRAP_CHANCE = 0.5f;  // 50% chance for a room to have traps
+    const float ROOM_TRAP_CHANCE = 0.5f;  // Base chance for a room to have traps
     const int MAX_TRAPS_PER_ROOM = 3;     // Maximum number of traps per room
     
-    // Clear trap locations array
     memset(trap_locations, 0, sizeof(trap_locations));
     
     for (int r = 0; r < room_count; r++) {
-        if ((rand() % 100) > (ROOM_TRAP_CHANCE * 100)) {
-            continue;
+        float trap_chance = ROOM_TRAP_CHANCE;
+        int max_traps = MAX_TRAPS_PER_ROOM;
+        
+        // Adjust trap chances based on room type
+        if (rooms[r].room_type == 1) { // Treasure room
+            trap_chance *= 0.5; // 50% less chance for traps
+            max_traps = 1;     // Maximum 1 trap in treasure rooms
+        } else if (rooms[r].room_type == 2) { // Enchant room
+            trap_chance *= 0.7; // 30% less chance for traps
+            max_traps = 2;     // Maximum 2 traps in enchant rooms
         }
 
+        if ((rand() % 100) > (trap_chance * 100)) {
+            continue;
+        }
         Room room = rooms[r];
         int traps_placed = 0;
         int attempts = 0;
@@ -393,54 +424,47 @@ void place_pillars(Room room) {
 }
 
 void place_gold(Room* rooms, int room_count) {
-    const float ROOM_CHANCE = 0.7f;  // 70% chance for a room to have gold
-    const int GOLD_PER_ROOM = 2;     // Number of gold piles per room
-    
     for (int r = 0; r < room_count; r++) {
-        if ((rand() % 100) > (ROOM_CHANCE * 100)) {
-            continue;
+        Room room = rooms[r];
+        int gold_count = 2; // default gold count
+        float large_gold_chance = 0.1f; // default 10% chance for large gold
+        
+        // Adjust based on room type
+        if (room.room_type == 1) { // Treasure room
+            gold_count = 4; // More gold in treasure rooms
+            large_gold_chance = 0.3f; // 30% chance for large gold
+        } else if (room.room_type == 2) { // Enchant room
+            gold_count = 1; // Less gold in enchant rooms
+            large_gold_chance = 0.05f; // 5% chance for large gold
         }
 
-        Room room = rooms[r];
-        int gold_placed = 0;
-        int attempts = 0;
-        
-        while (gold_placed < GOLD_PER_ROOM && attempts < 20) {
-            int x = room.x + 2 + (rand() % (room.width - 3));
-            int y = room.y + 2 + (rand() % (room.height - 3));
-            
-            if (map[y][x] == FLOOR) {
-                bool is_suitable = true;
-                for (int dy = -1; dy <= 1; dy++) {
-                    for (int dx = -1; dx <= 1; dx++) {
-                        char nearby_tile = map[y + dy][x + dx];
-                        if (nearby_tile == DOOR || 
-                            nearby_tile == '=' || 
-                            nearby_tile == PILLAR || 
-                            nearby_tile == GOLD_SMALL ||
-                            nearby_tile == GOLD_MEDIUM ||
-                            nearby_tile == GOLD_LARGE) {
-                            is_suitable = false;
-                            break;
-                        }
-                    }
-                    if (!is_suitable) break;
-                }
+        for (int i = 0; i < gold_count; i++) {
+            int attempts = 0;
+            while (attempts < 20) {
+                int x = room.x + 2 + (rand() % (room.width - 3));
+                int y = room.y + 2 + (rand() % (room.height - 3));
                 
-                if (is_suitable) {
-                    // Randomly choose gold type
-                    int gold_type = rand() % 100;
-                    if (gold_type < 60) {          // 60% chance for small gold
-                        map[y][x] = GOLD_SMALL;
-                    } else if (gold_type < 90) {   // 30% chance for medium gold
-                        map[y][x] = GOLD_MEDIUM;
-                    } else {                       // 10% chance for large gold
-                        map[y][x] = GOLD_LARGE;
+                if (map[y][x] == FLOOR) {
+                    bool is_suitable = true;
+                    // [existing suitability check code remains the same]
+                    
+                    if (is_suitable) {
+                        float gold_roll = (float)rand() / RAND_MAX;
+                        map[y][x] = GOLD_SMALL;  // Always use '*' symbol
+                        
+                        // Store the actual value in gold_values array
+                        if (gold_roll < large_gold_chance) {
+                            gold_values[y][x] = 10;  // Large gold value
+                        } else if (gold_roll < large_gold_chance + 0.3f) {
+                            gold_values[y][x] = 5;   // Medium gold value
+                        } else {
+                            gold_values[y][x] = 1;   // Small gold value
+                        }
+                        break;
                     }
-                    gold_placed++;
                 }
+                attempts++;
             }
-            attempts++;
         }
     }
 }
@@ -625,7 +649,35 @@ void draw_map() {
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
             if (map[y][x] != ' ') {
+                // Determine room type for this position
+                int room_type = 0;
+                for (int i = 0; i < current_level.room_count; i++) {
+                    if (x >= current_level.rooms[i].x && 
+                        x <= current_level.rooms[i].x + current_level.rooms[i].width &&
+                        y >= current_level.rooms[i].y && 
+                        y <= current_level.rooms[i].y + current_level.rooms[i].height) {
+                        room_type = current_level.rooms[i].room_type;
+                        break;
+                    }
+                }
+                
+                // Set color based on room type
+                int color_pair;
+                switch(room_type) {
+                    case 1: // Treasure room
+                        color_pair = 5;
+                        break;
+                    case 2: // Enchant room
+                        color_pair = 7;
+                        break;
+                    default: // Regular room or corridors
+                        color_pair = 6;
+                        break;
+                }
+                
+                attron(COLOR_PAIR(color_pair));
                 mvprintw(y, x, "%c", map[y][x]);
+                attroff(COLOR_PAIR(color_pair));
             }
         }
     }
@@ -645,7 +697,7 @@ int get_current_room_type(location player) {
 void update_status_line(int score, int level, int player_health, location player, time_t start_time) {
     int room_type = get_current_room_type(player);
     const char* room_name;
-    attron(COLOR_PAIR(3)); // Use white color for status
+    attron(COLOR_PAIR(1)); 
 
     switch(room_type) {
         case 1:
@@ -674,6 +726,7 @@ void update_status_line(int score, int level, int player_health, location player
 
 int main() {
     initscr();
+    init_map();
     memset(trap_locations, 0, sizeof(trap_locations));
     memset(revealed_traps, 0, sizeof(revealed_traps));
     noecho();
@@ -687,14 +740,19 @@ int main() {
     }
     
     start_color();
-    use_default_colors();  // This allows using the terminal's default background
+    use_default_colors(); 
 
-    // Define color pairs that will work well with purple background
-    init_pair(1, COLOR_BLACK, COLOR_WHITE);    // For messages
-    init_pair(2, COLOR_YELLOW, -1);            // Bright player color (-1 means default background)
-    init_pair(3, COLOR_WHITE, -1);             // For regular text
-    init_pair(4, COLOR_RED, -1);               // For traps and damage messages
-    
+
+        init_pair(1, COLOR_BLACK, COLOR_WHITE);    // For messages
+        init_pair(2, COLOR_YELLOW, -1);            // Bright player color
+        init_pair(3, COLOR_WHITE, -1);             // For regular text
+        init_pair(4, COLOR_RED, -1);               // For traps and damage messages
+
+        init_pair(5, COLOR_YELLOW, -1);            // For treasure rooms
+        init_pair(6, COLOR_WHITE, -1);             // For regular rooms
+        init_pair(7, COLOR_MAGENTA, -1);           // For enchant rooms
+        init_pair(8, COLOR_GREEN, -1);
+
     srand(time(NULL));
     time_t game_start_time = time(NULL);
 
@@ -779,18 +837,11 @@ int main() {
                         }
                         // Check for gold collection
                         else if (map[player.y][player.x] == GOLD_SMALL) {
-                            map[player.y][player.x] = FLOOR;
-                            score += 1;
-                            mvprintw(40, 1, "You found a small pile of gold! (+1)");
-                        } else if (map[player.y][player.x] == GOLD_MEDIUM) {
-                            map[player.y][player.x] = FLOOR;
-                            score += 5;
-                            mvprintw(40, 1, "You found a medium pile of gold! (+5)");
-                        } else if (map[player.y][player.x] == GOLD_LARGE) {
-                            map[player.y][player.x] = FLOOR;
-                            score += 10;
-                            mvprintw(40, 1, "You found a large pile of gold! (+10)");
-                        }
+                        int gold_value = gold_values[player.y][player.x];
+                        map[player.y][player.x] = FLOOR;
+                        score += gold_value;
+                        mvprintw(40, 1, "You found a coin worth %d gold!", gold_value);
+}
                         //check for food
                         
                         else if (map[player.y][player.x] == FOOD) {
@@ -828,6 +879,18 @@ int main() {
                 // Wait for ENTER or q
             }
             if (ch != 'q') {
+                if(level == 5){
+            clear();
+            attron(COLOR_PAIR(8) | A_BOLD);
+            mvprintw(20, MAP_WIDTH/2 - 3, "YOU WON!");
+            attroff(COLOR_PAIR(8) | A_BOLD);
+            mvprintw(22,MAP_WIDTH/2 - 5, "YOUR SCORE:%d",score);
+            refresh();
+            napms(2000);  
+            getch();
+            break;  
+                }
+                else{
                 // Store current stair information before generating new level
                 StairInfo prev_level_stair;
                 prev_level_stair.stair_pos.x = player.x;
@@ -862,7 +925,6 @@ int main() {
                 draw_borders();
                 draw_map();
                 mvprintw(42, 1, "Date/Time (UTC): %s", datetime);
-                mvprintw(43, 1, "User: mahdi200584");
                 update_status_line(score, level, player_health, player, game_start_time);
                 attron(COLOR_PAIR(2) | A_BOLD);
                 mvprintw(player.y, player.x, "@");
@@ -870,7 +932,7 @@ int main() {
                 refresh();
             }
         }
-
+        }
         // Update status lines
         update_status_line(score, level, player_health, player, game_start_time);
         draw_borders();
@@ -894,7 +956,6 @@ int main() {
 
         // Refresh the static info
         mvprintw(42, 1, "Date/Time (UTC): %s", datetime);
-        mvprintw(43, 1, "User: mahdi200584");
         refresh();
     }
     

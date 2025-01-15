@@ -845,8 +845,8 @@ int main() {
                         //check for food
                         
                         else if (map[player.y][player.x] == FOOD) {
-                            map[player.y][player.x] = FLOOR;
                             if(player_health < 100){
+                            map[player.y][player.x] = FLOOR;
                             player_health += 10;
                             mvprintw(40, 1, "You found food! (+10)");
                             }
@@ -881,10 +881,59 @@ int main() {
             if (ch != 'q') {
                 if(level == 5){
             clear();
+            attron(COLOR_PAIR(2) | A_BOLD);
+            int temp = 30;
+            mvprintw(0,temp,"                                     :x$$$$$$&&&&&&&&&&&&$$$$x:                                     ");
+            mvprintw(1,temp,"                             :&&&&&$X&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&$;                              ");
+            mvprintw(2,temp,"                             $&&     ;&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&$                             ");
+            mvprintw(3,temp,"                   x&&&&&&&&&&&&     X&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&X                   ");
+            mvprintw(4,temp,"                  &&&&&&&&&&&&&&     $&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&.                 ");
+            mvprintw(5,temp,"                 x&&&        X&&;    $&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&X        &&&X                 ");
+            mvprintw(6,temp,"                 +&&&.       ;&&x    $&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&+        &&&+                 ");
+            mvprintw(7,temp,"                  &&&&        &&X    $&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&        &&&&                  ");
+            mvprintw(8,temp,"                  &&&&        &&X    $&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&        &&&&                  ");
+            mvprintw(9,temp,"                   $&&&.      &&&:   x&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&      .&&&&.                  ");
+            mvprintw(10,temp,"                    $&&&X     :&&+   .&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&:     x&&&$.                   ");
+            mvprintw(11,temp,"                     X&&&$:    &&$.   &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&    .$&&&X                     ");
+            mvprintw(12,temp,"                      .&&&&X.   &&+   &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&.   X&&&&:                      ");
+            mvprintw(13,temp,"                        ;&&&&X. x&&.   &&&&&&&&&&&&&&&&&&&&&&&&&&&&x .X&&&&;                        ");
+            mvprintw(14,temp,"                          +&&&&$+&&$   &&&&&&&&&&&&&&&&&&&&&&&&&&&&+$&&&&x                          ");
+            mvprintw(15,temp,"                            x&&&&&&&x   &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&x                            ");
+            mvprintw(16,temp,"                              :&&&&&&x  x&&&&&&&&&&&&&&&&&&&&&&&&&&&&:                              ");
+            mvprintw(17,temp,"                                 x&&&&X  $&&&&&&&&&&&&&&&&&&&&&&&&x                                 ");
+            mvprintw(18,temp,"                                    x&&X .&&&&&&&&&&&&&&&&&&&&&X                                    ");
+            mvprintw(19,temp,"                                      &&$.:&&&&&&&&&&&&&&&&&&&                                      ");
+            mvprintw(20,temp,"                                        &&::$&&&&&&&&&&&&&&&.                                       ");
+            mvprintw(21,temp,"                                         ;&&.$&&&&&&&&&&&&+                                         ");
+            mvprintw(22,temp,"                                           +&&&&&&&&&&&$x                                           ");
+            mvprintw(23,temp,"                                             +&&&&&&&&+                                             ");
+            mvprintw(24,temp,"                                            x&&&&&&&&&&X                                            ");
+            mvprintw(25,temp,"                                             X$&&&&&&$X                                             ");
+            mvprintw(26,temp,"                                                &&&&                                                ");
+            mvprintw(27,temp,"                                                &&&&                                                ");
+            mvprintw(28,temp,"                                                &&&&                                                ");
+            mvprintw(29,temp,"                                                &&&&                                                ");
+            mvprintw(30,temp,"                                                &&&&                                                ");
+            mvprintw(31,temp,"                                               +&&&&x                                               ");
+            mvprintw(32,temp,"                                              :&&&&&&:                                              ");
+            mvprintw(33,temp,"                                             x&&&&&&&&x                                             ");
+            mvprintw(34,temp,"                                         :+$&&&&&&&&&&&&$+:                                         ");
+            mvprintw(35,temp,"                                    :&&&&&&&&&&&&&&&&&&&&&&&&&&$                                    ");
+            mvprintw(36,temp,"                                 .xx&&&&&&&&&&&&&&&&&&&&&&&&&&&&$x+                                 ");
+            mvprintw(37,temp,"                                X&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&:                               ");
+            mvprintw(38,temp,"                                &&&&&&$++++++++++++++++++++++x&&&&&&+                               ");
+            mvprintw(39,temp,"                                &&&&&$ ;                    ;. &&&&&+                               ");
+            mvprintw(40,temp,"                                &&&&&$                         &&&&&+                               ");
+            mvprintw(41,temp,"                                &&&&&$                         &&&&&+                               ");
+            mvprintw(42,temp,"                                &&&&&$                         &&&&&+                               ");
+            mvprintw(43,temp,"                                &&&&&&.                       +&&&&&+                               ");
+            mvprintw(44,temp,"                                $&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&;                               ");
+            mvprintw(45,temp,"                                 X$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$X+                                ");
+            attroff(COLOR_PAIR(2) | A_BOLD);
             attron(COLOR_PAIR(8) | A_BOLD);
-            mvprintw(20, MAP_WIDTH/2 - 3, "YOU WON!");
+            mvprintw(39,76, "YOU WON!");
             attroff(COLOR_PAIR(8) | A_BOLD);
-            mvprintw(22,MAP_WIDTH/2 - 5, "YOUR SCORE:%d",score);
+            mvprintw(41,74, "YOUR SCORE:%d",score);
             refresh();
             napms(2000);  
             getch();

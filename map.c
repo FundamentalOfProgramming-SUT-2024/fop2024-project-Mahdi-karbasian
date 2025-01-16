@@ -21,16 +21,35 @@
 #define TRAP_VISIBLE '^'   // Visible trap symbol (shown after triggering)
 #define TRAP_DAMAGE 10     // Damage dealt by traps
 #define MAX_HEALTH 100     // Maximum player health
-#define MACE L"⚒"
 #define FOOD '8'
-
+#define SWORD_SYMBOL 'I'
+#define DAGGER_SYMBOL 'D'
+#define MAGIC_WAND_SYMBOL '%'
+#define ARROW_SYMBOL 'V'
 #define MIN_ROOM_SIZE 4
 #define MAX_ROOM_SIZE 16
 #define MAX_ROOMS 12
 
 #define MAP_WIDTH 160
 #define MAP_HEIGHT 40
+#define MAX_INVENTORY 10
+#define FOOD_HEAL 10
 
+typedef struct {
+    char symbol;
+    char* name;
+    int heal_value;    // For food
+    int damage;        // For weapons
+    bool isEquipped;
+    bool isWeapon;     // To distinguish between weapons and other items
+} Item;
+
+typedef struct {
+    Item items[MAX_INVENTORY];
+    int count;
+} Inventory;
+
+Inventory player_inventory;
 typedef struct {
     int x;
     int y;
@@ -58,6 +77,20 @@ typedef struct {
 
 Level current_level;
 
+typedef struct{
+    char symbol;
+    int damage;
+    char* name;
+    bool isEquipped;
+    int max_amount;
+} weapon;
+
+weapon mace;
+weapon sword;
+weapon dagger;
+weapon arrow;
+weapon Magic_wand;
+
 char map[MAP_HEIGHT][MAP_WIDTH];
 location spawn;
 int i = 0;
@@ -66,11 +99,293 @@ int player_health = MAX_HEALTH;
 char revealed_traps[MAP_HEIGHT][MAP_WIDTH] = {0}; // Tracks revealed traps
 bool trap_locations[MAP_HEIGHT][MAP_WIDTH] = {{false}};  // Tracks where traps are
 int gold_values[MAP_HEIGHT][MAP_WIDTH] = {{0}};
+
 void init_map() {
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
             map[y][x] = ' ';
             gold_values[y][x] = 0;  // Initialize gold values
+        }
+    }
+}
+
+void init_weapons() {
+    mace.name = strdup("MACE");
+    mace.damage = 5;
+    mace.isEquipped = true;
+    mace.symbol = 'M';
+    mace.max_amount = 1;
+
+    dagger.name = strdup("DAGGER");
+    dagger.damage = 12;
+    dagger.symbol = 'D';
+    dagger.isEquipped = false;
+    dagger.max_amount = 10;  // Can carry up to 10 daggers
+
+    Magic_wand.name = strdup("MAGIC WAND");
+    Magic_wand.damage = 15;
+    Magic_wand.symbol = '%';
+    Magic_wand.isEquipped = false;
+    Magic_wand.max_amount = 8;  // Can carry up to 8 wands
+
+    arrow.name = strdup("ARROW");
+    arrow.damage = 5;
+    arrow.max_amount = 20;  // Can carry up to 20 arrows
+    arrow.symbol = 'V';
+    arrow.isEquipped = false;
+
+    sword.name = strdup("SWORD");
+    sword.damage = 10;
+    sword.isEquipped = false;
+    sword.max_amount = 1;  // Can only carry 1 sword
+    sword.symbol = 'I';
+}
+
+void init_starting_weapon() {
+    // Add mace to starting inventory
+    if (player_inventory.count < MAX_INVENTORY) {
+        player_inventory.items[player_inventory.count].symbol = 'M';
+        player_inventory.items[player_inventory.count].name = "MACE";
+        player_inventory.items[player_inventory.count].damage = mace.damage;
+        player_inventory.items[player_inventory.count].isEquipped = true;
+        player_inventory.items[player_inventory.count].isWeapon = true;
+        player_inventory.items[player_inventory.count].heal_value = 0;
+        player_inventory.count++;
+    }
+}
+
+// Add this to your global declarations at the top
+bool sword_collected = false;
+bool sword_placed = false;
+
+// Add this new simpler function to check weapon limits
+bool can_pickup_weapon(char weapon_symbol) {
+    if (player_inventory.count >= MAX_INVENTORY) {
+        return false;
+    }
+
+    int weapon_count = 0;
+    for (int i = 0; i < player_inventory.count; i++) {
+        if (player_inventory.items[i].symbol == weapon_symbol) {
+            weapon_count++;
+            // Special case for sword and mace (only one allowed)
+            if (weapon_symbol == SWORD_SYMBOL || weapon_symbol == 'M') {
+                return false;
+            }
+            // For other weapons, check their limits
+            if ((weapon_symbol == DAGGER_SYMBOL && weapon_count >= 10) ||
+                (weapon_symbol == MAGIC_WAND_SYMBOL && weapon_count >= 8) ||
+                (weapon_symbol == ARROW_SYMBOL && weapon_count >= 20)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// Simplified pickup_weapon function
+void pickup_weapon(char weapon_symbol, int x, int y) {
+    if (!can_pickup_weapon(weapon_symbol)) {
+        mvprintw(40, 1, "Cannot pick up more of this weapon type!");
+        return;
+    }
+
+    Item* new_item = &player_inventory.items[player_inventory.count];
+    new_item->symbol = weapon_symbol;
+    new_item->isWeapon = true;
+    new_item->isEquipped = false;
+
+    switch(weapon_symbol) {
+        case SWORD_SYMBOL:
+            new_item->name = "SWORD";
+            new_item->damage = 10;
+            sword_collected = true;
+            break;
+        case DAGGER_SYMBOL:
+            new_item->name = "DAGGER";
+            new_item->damage = 12;
+            break;
+        case MAGIC_WAND_SYMBOL:
+            new_item->name = "MAGIC WAND";
+            new_item->damage = 15;
+            break;
+        case ARROW_SYMBOL:
+            new_item->name = "ARROW";
+            new_item->damage = 5;
+            break;
+        default:
+            return;
+    }
+
+    player_inventory.count++;
+    map[y][x] = FLOOR;
+    mvprintw(40, 1, "Picked up %s!", new_item->name);
+}
+
+// Modify the init_inventory function
+void init_inventory() {
+    player_inventory.count = 0;
+    for (int i = 0; i < MAX_INVENTORY; i++) {
+        player_inventory.items[i].symbol = ' ';
+        player_inventory.items[i].name = NULL;
+        player_inventory.items[i].heal_value = 0;
+        player_inventory.items[i].damage = 0;
+        player_inventory.items[i].isEquipped = false;
+        player_inventory.items[i].isWeapon = false;
+    }
+
+    // Add starting mace
+    if (player_inventory.count < MAX_INVENTORY) {
+        Item* mace_item = &player_inventory.items[player_inventory.count];
+        mace_item->symbol = 'M';
+        mace_item->name = "MACE";
+        mace_item->damage = 5;
+        mace_item->isEquipped = true;
+        mace_item->isWeapon = true;
+        mace_item->heal_value = 0;
+        player_inventory.count++;
+    }
+}
+
+// Update your display_inventory function
+void display_inventory() {
+    clear();
+    mvprintw(1, 1, "=== INVENTORY ===");
+    mvprintw(2, 1, "Items: %d/%d", player_inventory.count, MAX_INVENTORY);
+    mvprintw(3, 1, "Current Health: %d/%d", player_health, MAX_HEALTH);
+    
+    int row = 5;
+    
+    // First display weapons
+    mvprintw(row++, 1, "WEAPONS:");
+    for (int i = 0; i < player_inventory.count; i++) {
+        if (player_inventory.items[i].isWeapon) {
+            mvprintw(row++, 1, "%d. %c %s (Damage: %d)%s", 
+                     i + 1,
+                     player_inventory.items[i].symbol,
+                     player_inventory.items[i].name,
+                     player_inventory.items[i].damage,
+                     player_inventory.items[i].isEquipped ? " [EQUIPPED]" : "");
+        }
+    }
+    
+    row += 2;
+    mvprintw(row++, 1, "FOOD:");
+    for (int i = 0; i < player_inventory.count; i++) {
+        if (!player_inventory.items[i].isWeapon) {
+            mvprintw(row++, 1, "%d. %c %s (Heals: %d)", 
+                     i + 1,
+                     player_inventory.items[i].symbol,
+                     player_inventory.items[i].name,
+                     player_inventory.items[i].heal_value);
+        }
+    }
+    
+    mvprintw(row + 2, 1, "Press 1-9 to use items or equip weapons");
+    mvprintw(row + 3, 1, "Press 'i' to close inventory");
+    refresh();
+}
+
+// Update your use_item function
+void use_item(int index) {
+    if (index >= player_inventory.count) return;
+    
+    Item* item = &player_inventory.items[index];
+    
+    if (item->isWeapon) {
+        // Unequip currently equipped weapon
+        for (int i = 0; i < player_inventory.count; i++) {
+            if (player_inventory.items[i].isWeapon) {
+                player_inventory.items[i].isEquipped = false;
+            }
+        }
+        // Equip the selected weapon
+        item->isEquipped = true;
+        mvprintw(40, 1, "Equipped %s!", item->name);
+    } else if (item->symbol == FOOD) {
+        if (player_health < MAX_HEALTH) {
+            int heal_amount = item->heal_value;
+            if (player_health + heal_amount > MAX_HEALTH) {
+                heal_amount = MAX_HEALTH - player_health;
+            }
+            player_health += heal_amount;
+            mvprintw(40, 1, "Used Food Ration: Restored %d health!", heal_amount);
+            
+            // Remove food item from inventory
+            for (int i = index; i < player_inventory.count - 1; i++) {
+                player_inventory.items[i] = player_inventory.items[i + 1];
+            }
+            player_inventory.count--;
+        } else {
+            mvprintw(40, 1, "Already at full health!");
+        }
+    }
+}
+
+
+void place_weapons(Room* rooms, int room_count) {
+    const float WEAPON_CHANCE = 0.35f;  // 35% chance for a room to have a weapon
+    
+    for (int r = 0; r < room_count; r++) {
+        if ((rand() % 100) > (WEAPON_CHANCE * 100)) {
+            continue;
+        }
+
+        Room room = rooms[r];
+        int attempts = 0;
+        const int MAX_ATTEMPTS = 20;
+        
+        while (attempts < MAX_ATTEMPTS) {
+            int x = room.x + 2 + (rand() % (room.width - 3));
+            int y = room.y + 2 + (rand() % (room.height - 3));
+            
+            if (map[y][x] == FLOOR) {
+                bool is_suitable = true;
+                // Check surrounding area for other items
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dx = -1; dx <= 1; dx++) {
+                        char nearby_tile = map[y + dy][x + dx];
+                        if (nearby_tile == DOOR || 
+                            nearby_tile == STAIR || 
+                            nearby_tile == GOLD_SMALL ||
+                            nearby_tile == PILLAR ||
+                            nearby_tile == FOOD ||
+                            nearby_tile == SWORD_SYMBOL ||
+                            nearby_tile == DAGGER_SYMBOL ||
+                            nearby_tile == MAGIC_WAND_SYMBOL ||
+                            nearby_tile == ARROW_SYMBOL) {
+                            is_suitable = false;
+                            break;
+                        }
+                    }
+                    if (!is_suitable) break;
+                }
+                
+                if (is_suitable) {
+                    // Decide which weapon to place
+                    int weapon_type = rand() % 100;
+                    
+                    // If sword hasn't been placed yet, give it a chance to be placed
+                    if (!sword_placed && weapon_type < 25) {
+                        map[y][x] = SWORD_SYMBOL;
+                        sword_placed = true;
+                    }
+                    // Otherwise place other weapons
+                    else {
+                        if (weapon_type < 40) {
+                            map[y][x] = DAGGER_SYMBOL;
+                        }
+                        else if (weapon_type < 60) {
+                            map[y][x] = MAGIC_WAND_SYMBOL;
+                        }
+                        else {
+                            map[y][x] = ARROW_SYMBOL;
+                        }
+                    }
+                    break;
+                }
+            }
+            attempts++;
         }
     }
 }
@@ -615,6 +930,7 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
     place_doors();
     place_gold(current_level.rooms, current_level.room_count);
     place_food(current_level.rooms, current_level.room_count);
+    place_weapons(current_level.rooms, current_level.room_count);
     if (prev_stair == NULL) {
         // First level - place stairs in furthest room from start
         Room furthest = find_furthest_room(current_level.rooms, current_level.room_count, 
@@ -724,9 +1040,13 @@ void update_status_line(int score, int level, int player_health, location player
     attroff(COLOR_PAIR(3));
 }
 
+
+
 int main() {
     initscr();
     init_map();
+    init_inventory();
+    init_starting_weapon();
     memset(trap_locations, 0, sizeof(trap_locations));
     memset(revealed_traps, 0, sizeof(revealed_traps));
     noecho();
@@ -784,7 +1104,6 @@ int main() {
 
     // Display initial status
     mvprintw(42, 1, "Date/Time (UTC): %s", datetime);
-    mvprintw(43, 1, "User: mahdi200584");
     update_status_line(score, level, player_health, player, game_start_time);
     refresh();
 
@@ -816,7 +1135,11 @@ int main() {
                         (map[new_y][new_x] == FLOOR || map[new_y][new_x] == DOOR ||
                          map[new_y][new_x] == '#' || map[new_y][new_x] == GOLD_SMALL ||
                          map[new_y][new_x] == GOLD_MEDIUM || map[new_y][new_x] == GOLD_LARGE ||
-                         map[new_y][new_x] == STAIR || map[new_y][new_x] == TRAP_HIDDEN ||map[new_y][new_x] == FOOD)) {
+                         map[new_y][new_x] == STAIR || map[new_y][new_x] == TRAP_HIDDEN ||map[new_y][new_x] == FOOD||
+                         map[new_y][new_x] == SWORD_SYMBOL ||    // Add these lines
+                         map[new_y][new_x] == DAGGER_SYMBOL ||
+                         map[new_y][new_x] == MAGIC_WAND_SYMBOL ||
+                         map[new_y][new_x] == ARROW_SYMBOL)) {
                         
                         // Clear old position
                         mvprintw(player.y, player.x, " ");
@@ -842,20 +1165,56 @@ int main() {
                         score += gold_value;
                         mvprintw(40, 1, "You found a coin worth %d gold!", gold_value);
 }
+
                         //check for food
                         
                         else if (map[player.y][player.x] == FOOD) {
-                            if(player_health < 100){
-                            map[player.y][player.x] = FLOOR;
-                            player_health += 10;
-                            mvprintw(40, 1, "You found food! (+10)");
-                            }
-                            else
-                            mvprintw(40, 1, "Already at full health!");
-                        }
+                        if (player_inventory.count < MAX_INVENTORY) {
+                        map[player.y][player.x] = FLOOR;
+                        player_inventory.items[player_inventory.count].symbol = FOOD;
+                        player_inventory.items[player_inventory.count].name = "Food Ration";
+                        player_inventory.items[player_inventory.count].heal_value = FOOD_HEAL;
+                        player_inventory.items[player_inventory.count].isEquipped = false;
+                        player_inventory.count++;
+                        mvprintw(40, 1, "Picked up Food!");
+    } else {
+        mvprintw(40, 1, "Inventory full! Cannot pick up food!");
+    }
+}
+else if (map[player.y][player.x] == SWORD_SYMBOL ||
+         map[player.y][player.x] == DAGGER_SYMBOL ||
+         map[player.y][player.x] == MAGIC_WAND_SYMBOL ||
+         map[player.y][player.x] == ARROW_SYMBOL) {
+    // Clear any previous messages
+    for(int i = 37; i <= 40; i++) {
+        move(i, 1);
+        clrtoeol();
+    }
+    pickup_weapon(map[player.y][player.x], player.x, player.y);
+    refresh();
+}
                     }
                 }
                 break;
+
+                case 'i':  // Open/close inventory
+                display_inventory();
+                while (1) {
+                int ch = getch();
+                if (ch == 'i') {
+                break;  // Exit inventory
+                } else if (ch >= '1' && ch <= '9') {
+                use_item(ch - '1');
+                display_inventory();  // Refresh inventory display
+        }
+    }
+    // Redraw the game screen
+            clear();
+            draw_borders();
+            draw_map();
+            update_status_line(score, level, player_health, player, game_start_time);
+            break;
+
         }
 
         // Check for player death

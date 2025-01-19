@@ -99,7 +99,7 @@ int player_health = MAX_HEALTH;
 char revealed_traps[MAP_HEIGHT][MAP_WIDTH] = {0}; // Tracks revealed traps
 bool trap_locations[MAP_HEIGHT][MAP_WIDTH] = {{false}};  // Tracks where traps are
 int gold_values[MAP_HEIGHT][MAP_WIDTH] = {{0}};
-
+bool hidden_door = false;
 void init_map() {
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
@@ -465,6 +465,9 @@ Room find_furthest_room(Room* rooms, int room_count, location start_pos) {
             furthest_room = rooms[i];
         }
     }
+    
+    // Set the furthest room as treasure room (type 1)
+    furthest_room.room_type = 1;
     
     return furthest_room;
 }
@@ -838,6 +841,7 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
     int attempts = 0;
     const int MAX_ATTEMPTS = 1000;
     const int MIN_ROOMS = 6;
+    static int current_level_number = 1;  // Add this to track the level number
     
     // If we have previous stair info, create the first room in exactly the same position
     if (prev_stair != NULL) {
@@ -851,17 +855,14 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
         current_level.rooms[current_level.room_count] = first_room;
         draw_room(first_room);
         place_pillars(first_room);
-        if(rand()%100 <80){
-        first_room.room_type = 3;
-        }
-        else {
-            first_room.room_type = 1;
-        }
+        first_room.room_type = 3; // Always start with regular room
         current_level.room_count++;
         
         // Set the spawn point to exactly where the stairs were
         doors[0].x = prev_stair->stair_pos.x;
         doors[0].y = prev_stair->stair_pos.y;
+        
+        current_level_number++; // Increment level number when going to next level
     }
 
     // Generate remaining rooms
@@ -874,18 +875,10 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
         new_room.y = 3 + (rand() % (MAP_HEIGHT - new_room.height - 6));
 
         if (!check_room_overlap(new_room, current_level.rooms, current_level.room_count)) {
+            new_room.room_type = 3; // Set as regular room initially
             current_level.rooms[current_level.room_count] = new_room;
             draw_room(new_room);
             place_pillars(new_room);
-            if(rand()%100 <50){
-        new_room.room_type = 3;
-        }
-        else if (rand() % 100 <80) {
-            new_room.room_type = 1;
-        }
-        else{
-            new_room.room_type = 2;
-        }
             current_level.room_count++;
         }
         attempts++;
@@ -903,17 +896,9 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
             new_room.y = 3 + (rand() % (MAP_HEIGHT - new_room.height - 6));
 
             if (!check_room_overlap(new_room, current_level.rooms, current_level.room_count)) {
+                new_room.room_type = 3; // Set as regular room initially
                 current_level.rooms[current_level.room_count] = new_room;
                 draw_room(new_room);
-                      if(rand()%100 <50){
-                      new_room.room_type = 3;
-                      }
-                       else if (rand() % 100 <80) {
-                       new_room.room_type = 1;
-                       }
-                       else{
-                      new_room.room_type = 2;
-                       }
                 current_level.room_count++;
             }
         }
@@ -931,17 +916,32 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
     place_gold(current_level.rooms, current_level.room_count);
     place_food(current_level.rooms, current_level.room_count);
     place_weapons(current_level.rooms, current_level.room_count);
+
+    // Find the furthest room and set it as treasure room if on level 5
+    Room furthest_room;
     if (prev_stair == NULL) {
-        // First level - place stairs in furthest room from start
-        Room furthest = find_furthest_room(current_level.rooms, current_level.room_count, 
-                                         (location){doors[0].x, doors[0].y});
-        location stair_pos = place_staircase(furthest);
+        // First level - find furthest room from start
+        furthest_room = find_furthest_room(current_level.rooms, current_level.room_count, 
+                                       (location){doors[0].x, doors[0].y});
     } else {
-        // Subsequent levels - place stairs in furthest room from player
-        Room furthest = find_furthest_room(current_level.rooms, current_level.room_count, 
-                                         (location){player_pos->x, player_pos->y});
-        location stair_pos = place_staircase(furthest);
+        // Subsequent levels - find furthest room from player
+        furthest_room = find_furthest_room(current_level.rooms, current_level.room_count, 
+                                       (location){player_pos->x, player_pos->y});
     }
+
+    // Update the room type in the current_level.rooms array
+    for (int i = 0; i < current_level.room_count; i++) {
+        if (current_level.rooms[i].x == furthest_room.x && 
+            current_level.rooms[i].y == furthest_room.y) {
+            // Only make it a treasure room if it's level 5
+            if (current_level_number == 5) {
+                current_level.rooms[i].room_type = 1; // Set as treasure room
+            }
+            location stair_pos = place_staircase(current_level.rooms[i]); // Place staircase in furthest room
+            break;
+        }
+    }
+
     place_traps(current_level.rooms, current_level.room_count);
 }
 

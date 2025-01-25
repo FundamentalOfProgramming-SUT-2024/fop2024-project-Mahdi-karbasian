@@ -34,6 +34,9 @@
 #define MAP_HEIGHT 40
 #define MAX_INVENTORY 10
 #define FOOD_HEAL 10
+#define PASSWORD_SYMBOL '?' // Symbol for password location
+#define LOCKED_DOOR '=' // Symbol for locked door
+#define PASSWORD_LENGTH 4 // Length of generated password
 
 typedef struct {
     char symbol;
@@ -100,12 +103,125 @@ char revealed_traps[MAP_HEIGHT][MAP_WIDTH] = {0}; // Tracks revealed traps
 bool trap_locations[MAP_HEIGHT][MAP_WIDTH] = {{false}};  // Tracks where traps are
 int gold_values[MAP_HEIGHT][MAP_WIDTH] = {{0}};
 bool hidden_door = false;
+char current_password[5]; // 4 chars + null terminator
+bool password_shown = false;
+time_t password_show_time = 0;
+location password_location;
+location locked_door_location;
+bool door_unlocked = false;
+
+void generate_password(void);
+
 void init_map() {
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
             map[y][x] = ' ';
             gold_values[y][x] = 0;  // Initialize gold values
         }
+    }
+}
+
+void generate_password() {
+    const char charset[] = "0123456789";
+    for (int i = 0; i < PASSWORD_LENGTH; i++) {
+        current_password[i] = charset[rand() % 10];
+    }
+    current_password[PASSWORD_LENGTH] = '\0';
+}
+
+void place_locked_door_and_password(Room* rooms, int room_count) {
+    // First, find rooms that have exactly one door
+    typedef struct {
+        Room* room;
+        location door_loc;
+        int door_count;
+    } RoomDoorInfo;
+    
+    RoomDoorInfo room_info[MAX_ROOMS];
+
+    // Initialize room_info
+    for (int r = 0; r < room_count; r++) {
+        room_info[r].room = &rooms[r];
+        room_info[r].door_count = 0;
+    }
+
+    // Debug print
+    mvprintw(0, 0, "Total doors: %d", i);
+    refresh();
+
+    // Count doors for each room
+    for (int d = 0; d < i; d++) {  // i is the global door counter
+        for (int r = 0; r < room_count; r++) {
+            if (rooms[r].room_type == 3) {  // Only consider regular rooms
+                // Check if this door belongs to this room
+                if ((doors[d].x >= rooms[r].x - 1 && doors[d].x <= rooms[r].x + rooms[r].width + 1) &&
+                    (doors[d].y >= rooms[r].y - 1 && doors[d].y <= rooms[r].y + rooms[r].height + 1)) {
+                    room_info[r].door_count++;
+                    if (room_info[r].door_count == 1) {
+                        room_info[r].door_loc = doors[d];
+                    }
+                }
+            }
+        }
+    }
+
+    // Create array of rooms with exactly one door
+    int single_door_count = 0;
+    RoomDoorInfo* single_door_rooms[MAX_ROOMS];
+
+    for (int r = 0; r < room_count; r++) {
+        if (room_info[r].door_count == 1) {
+            single_door_rooms[single_door_count++] = &room_info[r];
+        }
+    }
+
+    if (single_door_count == 0) return;  // No suitable rooms found
+
+    // Select a random room with one door
+    int selected = rand() % single_door_count;
+    RoomDoorInfo* selected_info = single_door_rooms[selected];
+
+    // Make this door the locked door
+    locked_door_location = selected_info->door_loc;
+    map[locked_door_location.y][locked_door_location.x] = LOCKED_DOOR;
+
+    // Place password in starting room (room[0])
+    Room* password_room = &rooms[0];
+    
+    // Find a suitable corner in the starting room for the password
+    bool password_placed = false;
+    int attempts = 0;
+    while (!password_placed && attempts < 20) {
+        int corner = rand() % 4;
+        switch(corner) {
+            case 0: // top-left
+                password_location.x = password_room->x + 1;
+                password_location.y = password_room->y + 1;
+                break;
+            case 1: // top-right
+                password_location.x = password_room->x + password_room->width - 1;
+                password_location.y = password_room->y + 1;
+                break;
+            case 2: // bottom-left
+                password_location.x = password_room->x + 1;
+                password_location.y = password_room->y + password_room->height - 1;
+                break;
+            case 3: // bottom-right
+                password_location.x = password_room->x + password_room->width - 1;
+                password_location.y = password_room->y + password_room->height - 1;
+                break;
+        }
+        
+        if (map[password_location.y][password_location.x] == FLOOR) {
+            map[password_location.y][password_location.x] = PASSWORD_SYMBOL;
+            password_placed = true;
+        }
+        attempts++;
+    }
+
+    if (password_placed) {
+        generate_password();
+        door_unlocked = false;
     }
 }
 
@@ -154,11 +270,9 @@ void init_starting_weapon() {
     }
 }
 
-// Add this to your global declarations at the top
 bool sword_collected = false;
 bool sword_placed = false;
 
-// Add this new simpler function to check weapon limits
 bool can_pickup_weapon(char weapon_symbol) {
     if (player_inventory.count >= MAX_INVENTORY) {
         return false;
@@ -183,7 +297,6 @@ bool can_pickup_weapon(char weapon_symbol) {
     return true;
 }
 
-// Simplified pickup_weapon function
 void pickup_weapon(char weapon_symbol, int x, int y) {
     if (!can_pickup_weapon(weapon_symbol)) {
         mvprintw(40, 1, "Cannot pick up more of this weapon type!");
@@ -222,7 +335,6 @@ void pickup_weapon(char weapon_symbol, int x, int y) {
     mvprintw(40, 1, "Picked up %s!", new_item->name);
 }
 
-// Modify the init_inventory function
 void init_inventory() {
     player_inventory.count = 0;
     for (int i = 0; i < MAX_INVENTORY; i++) {
@@ -247,7 +359,6 @@ void init_inventory() {
     }
 }
 
-// Update your display_inventory function
 void display_inventory() {
     clear();
     mvprintw(1, 1, "=== INVENTORY ===");
@@ -286,7 +397,6 @@ void display_inventory() {
     refresh();
 }
 
-// Update your use_item function
 void use_item(int index) {
     if (index >= player_inventory.count) return;
     
@@ -321,7 +431,6 @@ void use_item(int index) {
         }
     }
 }
-
 
 void place_weapons(Room* rooms, int room_count) {
     const float WEAPON_CHANCE = 0.35f;  // 35% chance for a room to have a weapon
@@ -875,7 +984,16 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
         new_room.y = 3 + (rand() % (MAP_HEIGHT - new_room.height - 6));
 
         if (!check_room_overlap(new_room, current_level.rooms, current_level.room_count)) {
-            new_room.room_type = 3; // Set as regular room initially
+            int num = rand() % 100;
+            if (num < 50)
+            new_room.room_type = 3; // Set as regular room initially   
+
+            else if(num < 80)
+            new_room.room_type = 1;
+
+            else
+            new_room.room_type = 2;
+
             current_level.rooms[current_level.room_count] = new_room;
             draw_room(new_room);
             place_pillars(new_room);
@@ -913,6 +1031,7 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
 
     create_corridors(current_level.rooms, current_level.room_count);
     place_doors();
+    place_locked_door_and_password(current_level.rooms, current_level.room_count);
     place_gold(current_level.rooms, current_level.room_count);
     place_food(current_level.rooms, current_level.room_count);
     place_weapons(current_level.rooms, current_level.room_count);
@@ -1067,7 +1186,7 @@ int main() {
         init_pair(2, COLOR_YELLOW, -1);            // Bright player color
         init_pair(3, COLOR_WHITE, -1);             // For regular text
         init_pair(4, COLOR_RED, -1);               // For traps and damage messages
-
+        init_pair(9, COLOR_RED, -1);               // For locked door
         init_pair(5, COLOR_YELLOW, -1);            // For treasure rooms
         init_pair(6, COLOR_WHITE, -1);             // For regular rooms
         init_pair(7, COLOR_MAGENTA, -1);           // For enchant rooms
@@ -1106,7 +1225,9 @@ int main() {
     mvprintw(42, 1, "Date/Time (UTC): %s", datetime);
     update_status_line(score, level, player_health, player, game_start_time);
     refresh();
-
+    password_shown = false;
+    door_unlocked = false;
+    generate_password();
     int ch;
     while ((ch = getch()) != 'q') {
         mvprintw(player.y, player.x, " ");
@@ -1139,7 +1260,9 @@ int main() {
                          map[new_y][new_x] == SWORD_SYMBOL ||    // Add these lines
                          map[new_y][new_x] == DAGGER_SYMBOL ||
                          map[new_y][new_x] == MAGIC_WAND_SYMBOL ||
-                         map[new_y][new_x] == ARROW_SYMBOL)) {
+                         map[new_y][new_x] == ARROW_SYMBOL ||
+                         map[new_y][new_x] == PASSWORD_SYMBOL ||
+                         map[new_y][new_x] == LOCKED_DOOR)) {
                         
                         // Clear old position
                         mvprintw(player.y, player.x, " ");
@@ -1148,6 +1271,34 @@ int main() {
                         player.x = new_x;
                         player.y = new_y;
                         
+                        // Inside your movement case block, after checking for valid move:
+                        if (new_x == password_location.x && new_y == password_location.y && !password_shown) {
+                        password_shown = true;
+                        password_show_time = time(NULL);
+                        attron(COLOR_PAIR(2) | A_BOLD);
+                        mvprintw(38, 2, "Password: %s", current_password);
+                        attroff(COLOR_PAIR(2) | A_BOLD);
+                        } else if (new_x == locked_door_location.x && new_y == locked_door_location.y && !door_unlocked) {
+                        char input_password[5];
+                        echo(); // Enable input echo
+                        mvprintw(38, 1, "Enter password: ");
+                        refresh();
+                        getnstr(input_password, 4);
+                        noecho(); // Disable input echo
+    
+                        if (strcmp(input_password, current_password) == 0) {
+                        door_unlocked = true;
+                        map[locked_door_location.y][locked_door_location.x] = DOOR;
+                        mvprintw(38, 1, "Door unlocked!                     ");
+                } else {
+                        mvprintw(38, 1, "Wrong password!                    ");
+                        new_x = player.x; // Prevent movement
+                        new_y = player.y;
+    }
+}
+
+
+
                         // Check for trap
                         if (trap_locations[player.y][player.x] && !revealed_traps[player.y][player.x]) {
                             player_health -= TRAP_DAMAGE;
@@ -1361,6 +1512,11 @@ else if (map[player.y][player.x] == SWORD_SYMBOL ||
         attron(COLOR_PAIR(2) | A_BOLD);
         mvprintw(player.y, player.x, "@");
         attroff(COLOR_PAIR(2) | A_BOLD);
+
+        if (password_shown && time(NULL) - password_show_time >= 5) {
+        password_shown = false;
+        mvprintw(38, 1, "                                     ");
+}
 
         // Refresh the static info
         mvprintw(42, 1, "Date/Time (UTC): %s", datetime);

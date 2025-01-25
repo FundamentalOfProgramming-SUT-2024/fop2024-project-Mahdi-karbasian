@@ -1262,7 +1262,8 @@ int main() {
                          map[new_y][new_x] == MAGIC_WAND_SYMBOL ||
                          map[new_y][new_x] == ARROW_SYMBOL ||
                          map[new_y][new_x] == PASSWORD_SYMBOL ||
-                         map[new_y][new_x] == LOCKED_DOOR)) {
+                         map[new_y][new_x] == LOCKED_DOOR
+                         )) {
                         
                         // Clear old position
                         mvprintw(player.y, player.x, " ");
@@ -1278,23 +1279,42 @@ int main() {
                         attron(COLOR_PAIR(2) | A_BOLD);
                         mvprintw(38, 2, "Password: %s", current_password);
                         attroff(COLOR_PAIR(2) | A_BOLD);
-                        } else if (new_x == locked_door_location.x && new_y == locked_door_location.y && !door_unlocked) {
+                        }
+                        
+                        else if (new_x == locked_door_location.x && new_y == locked_door_location.y && !door_unlocked) {
                         char input_password[5];
                         echo(); // Enable input echo
                         mvprintw(38, 1, "Enter password: ");
                         refresh();
                         getnstr(input_password, 4);
                         noecho(); // Disable input echo
-    
+
                         if (strcmp(input_password, current_password) == 0) {
+                        mvprintw(40, 2, "Door unlocked!                     ");
                         door_unlocked = true;
                         map[locked_door_location.y][locked_door_location.x] = DOOR;
-                        mvprintw(38, 1, "Door unlocked!                     ");
-                } else {
-                        mvprintw(38, 1, "Wrong password!                    ");
-                        new_x = player.x; // Prevent movement
-                        new_y = player.y;
+                        // Allow movement to new position
+                        player.x = new_x;
+                        player.y = new_y;
+                        } else {
+                        mvprintw(38, 2, "Wrong password!                    ");
+                        // Keep player in their original position
+                        if (map[player.y][player.x-1] == '#' /*|| map[player.y][player.x-1] == FLOOR*/) {
+                        new_x = player.x-1;
+                        }
+                        else if (map[player.y][player.x+1] == '#' /*|| map[player.y][player.x+1] == FLOOR*/) {
+                        new_x = player.x+1;
+                        }
+                        else if (map[player.y-1][player.x] == '#' /*|| map[player.y-1][player.x] == FLOOR*/) {
+                        new_y = player.y-1;
+                        }
+                        else if (map[player.y+1][player.x] == '#' /*|| map[player.y+1][player.x] == FLOOR*/) {
+                        new_y = player.y+1;
+                        }
+        player.x = new_x;
+        player.y = new_y;
     }
+    mvprintw(38, 2, "                                   ");
 }
 
 

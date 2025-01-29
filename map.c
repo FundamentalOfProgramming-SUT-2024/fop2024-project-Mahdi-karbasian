@@ -1560,6 +1560,8 @@ int main() {
                     int new_y = player.y;
                     mvprintw(42, 40, "player position x=%d, y=%d", player.x, player.y);
                     refresh();
+                    int pre_x = player.x;
+                    int pre_y = player.y; 
                     switch (ch) {
                         case KEY_UP:    new_y--; break;
                         case KEY_DOWN:  new_y++; break;
@@ -1597,44 +1599,61 @@ int main() {
                         attron(COLOR_PAIR(2) | A_BOLD);
                         mvprintw(38, 2, "Password: %s", current_password);
                         attroff(COLOR_PAIR(2) | A_BOLD);
-                        }
-                        
-                        else if (new_x == locked_door_location.x && new_y == locked_door_location.y && !door_unlocked) {
-                        char input_password[5];
-                        echo(); // Enable input echo
-                        mvprintw(38, 1, "Enter password: ");
-                        refresh();
-                        getnstr(input_password, 4);
-                        noecho(); // Disable input echo
+                        }                    
+else if (new_x == locked_door_location.x && new_y == locked_door_location.y && !door_unlocked) {
+    // Clear any existing messages
+    move(38, 1);
+    clrtoeol();
+    move(40, 1);
+    clrtoeol();
+    
+    char input_password[5];
+    echo(); // Enable input echo
+    mvprintw(38, 1, "Enter password: ");
+    refresh();
+    getnstr(input_password, 4);
+    noecho(); // Disable input echo
+    input_password[4] = '\0'; // Ensure null termination
 
-                        if (strcmp(input_password, current_password) == 0) {
-                        mvprintw(40, 2, "Door unlocked!                     ");
-                        door_unlocked = true;
-                        map[locked_door_location.y][locked_door_location.x] = DOOR;
-                        // Allow movement to new position
-                        player.x = new_x;
-                        player.y = new_y;
-                        } else {
-                        mvprintw(38, 2, "Wrong password!                    ");
-                        // Keep player in their original position
-                        if (map[player.y][player.x-1] == '#' /*|| map[player.y][player.x-1] == FLOOR*/) {
-                        new_x = player.x-1;
-                        }
-                        else if (map[player.y][player.x+1] == '#' /*|| map[player.y][player.x+1] == FLOOR*/) {
-                        new_x = player.x+1;
-                        }
-                        else if (map[player.y-1][player.x] == '#' /*|| map[player.y-1][player.x] == FLOOR*/) {
-                        new_y = player.y-1;
-                        }
-                        else if (map[player.y+1][player.x] == '#' /*|| map[player.y+1][player.x] == FLOOR*/) {
-                        new_y = player.y+1;
-                        }
+    if (strcmp(input_password, current_password) == 0) {
+        move(38, 1);
+        clrtoeol();
+        mvprintw(40, 1, "Door unlocked!");
+        refresh();
+        door_unlocked = true;
+        map[locked_door_location.y][locked_door_location.x] = DOOR;
+        // Allow movement to new position
         player.x = new_x;
         player.y = new_y;
+    } else {
+        move(38, 1);
+        clrtoeol();
+        mvprintw(40, 1, "Wrong password!");
+        player.x = pre_x;
+        player.y = pre_y;
+        refresh();
+        // Do not update player position at all - they stay at their current position
+        new_x = player.x;  // Reset the new position to current position
+        new_y = player.y;
+        
+        // Redraw player at current position
+        attron(COLOR_PAIR(2) | A_BOLD);
+        mvprintw(player.y, player.x, "@");
+        attroff(COLOR_PAIR(2) | A_BOLD);
     }
-    mvprintw(38, 2, "                                   ");
+    
+    // Wait a moment to show the message
+    refresh();
+    napms(1000); // Wait 1 second
+    
+    // Clear the messages
+    move(38, 1);
+    clrtoeol();
+    move(40, 1);
+    clrtoeol();
+    
+    refresh();
 }
-
 
 
                         // Check for trap
@@ -1802,27 +1821,26 @@ case 't': // Throw weapon
             mvprintw(27,temp,"                                                &&&&                                                ");
             mvprintw(28,temp,"                                                &&&&                                                ");
             mvprintw(29,temp,"                                                &&&&                                                ");
-            mvprintw(30,temp,"                                                &&&&                                                ");
-            mvprintw(31,temp,"                                               +&&&&x                                               ");
-            mvprintw(32,temp,"                                              :&&&&&&:                                              ");
-            mvprintw(33,temp,"                                             x&&&&&&&&x                                             ");
-            mvprintw(34,temp,"                                         :+$&&&&&&&&&&&&$+:                                         ");
-            mvprintw(35,temp,"                                    :&&&&&&&&&&&&&&&&&&&&&&&&&&$                                    ");
-            mvprintw(36,temp,"                                 .xx&&&&&&&&&&&&&&&&&&&&&&&&&&&&$x+                                 ");
-            mvprintw(37,temp,"                                X&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&:                               ");
-            mvprintw(38,temp,"                                &&&&&&$++++++++++++++++++++++x&&&&&&+                               ");
-            mvprintw(39,temp,"                                &&&&&$ ;                    ;. &&&&&+                               ");
+            mvprintw(30,temp,"                                               +&&&&x                                               ");
+            mvprintw(31,temp,"                                              :&&&&&&:                                              ");
+            mvprintw(32,temp,"                                             x&&&&&&&&x                                             ");
+            mvprintw(33,temp,"                                         :+$&&&&&&&&&&&&$+:                                         ");
+            mvprintw(34,temp,"                                    :&&&&&&&&&&&&&&&&&&&&&&&&&&$                                    ");
+            mvprintw(35,temp,"                                 .xx&&&&&&&&&&&&&&&&&&&&&&&&&&&&$x+                                 ");
+            mvprintw(36,temp,"                                X&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&:                               ");
+            mvprintw(37,temp,"                                &&&&&&$++++++++++++++++++++++x&&&&&&+                               ");
+            mvprintw(38,temp,"                                &&&&&$ ;                    ;. &&&&&+                               ");
+            mvprintw(39,temp,"                                &&&&&$                         &&&&&+                               ");
             mvprintw(40,temp,"                                &&&&&$                         &&&&&+                               ");
             mvprintw(41,temp,"                                &&&&&$                         &&&&&+                               ");
-            mvprintw(42,temp,"                                &&&&&$                         &&&&&+                               ");
-            mvprintw(43,temp,"                                &&&&&&.                       +&&&&&+                               ");
-            mvprintw(44,temp,"                                $&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&;                               ");
-            mvprintw(45,temp,"                                 X$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$X+                                ");
+            mvprintw(42,temp,"                                &&&&&&.                       +&&&&&+                               ");
+            mvprintw(43,temp,"                                $&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&;                               ");
+            mvprintw(44,temp,"                                 X$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$X+                                ");
             attroff(COLOR_PAIR(2) | A_BOLD);
             attron(COLOR_PAIR(8) | A_BOLD);
-            mvprintw(39,76, "YOU WON!");
+            mvprintw(38,76, "YOU WON!");
             attroff(COLOR_PAIR(8) | A_BOLD);
-            mvprintw(41,74, "YOUR SCORE:%d",score);
+            mvprintw(40,74, "YOUR SCORE:%d",score);
             refresh();
             napms(2000);  
             getch();

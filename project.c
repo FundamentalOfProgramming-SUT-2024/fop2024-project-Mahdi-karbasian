@@ -46,21 +46,44 @@ static char *setting[]={
 static int selected = 0;
 static char current_user[50] = "";
 static bool is_logged_in = false;
+static int dif_lvl = 1;
+static int current_color = 4;  // Default to WHITE (4)
+static int game_color = 4;     // Game color setting
+
+
+///////////////////////////////////////////////////////////////
 
 // Function prototypes
+
 void draw_menu(void);
+
 void main_menu(void);
+
 void create_user(void);
+
 bool login_user(void);
+
 void update_signin_time(const char *username);
+
 void get_current_utc_time(char *buffer, size_t size);
+
 int get_player_rank(const char *username);
+
 void display_scoreboard(void);
+
 bool is_valid_password(const char *password);
+
 int is_valid_email_format(const char *email, regex_t *regex);
+
 int is_valid_email_length(const char *email);
+
 int is_common_domain(const char *email);
+
 int compare_players(const void *a, const void *b);
+
+void color_settings_menu(void);
+//////////////////////////////////////////////////////////////////////////////////
+
 
 bool is_valid_password(const char *password) {
     bool has_upper = false;
@@ -117,10 +140,10 @@ void get_current_utc_time(char *buffer, size_t size) {
              tm_utc->tm_sec);
 }
 
-// Compare function for qsort (sorting in descending order by score)
 int compare_players(const void *a, const void *b) {
     return ((PlayerRank *)b)->score - ((PlayerRank *)a)->score;
 }
+
 void update_signin_time(const char *username) {
     FILE *users = fopen("user_info.txt", "rb+");
     if (users == NULL) return;
@@ -144,7 +167,6 @@ void update_signin_time(const char *username) {
     fclose(users);
 }
 
-// Function to get player's rank
 int get_player_rank(const char *username) {
     FILE *users = fopen("user_info.txt", "rb");
     if (users == NULL) return 0;
@@ -273,6 +295,7 @@ void draw_menu(void) {
     }
     refresh();
 }
+
 void main_menu(void) {
     clear();
     mvprintw(4, menu_x - 5, "WELCOME %s!", current_user);
@@ -296,6 +319,7 @@ void main_menu(void) {
     }
     refresh();
 }
+
 void n_game(void) {
     clear();
     mvprintw(4, menu_x - 5, "let's start a new game");
@@ -319,7 +343,6 @@ void n_game(void) {
     }
     refresh();
 }
-
 
 void create_user(void) {
     clear();
@@ -493,6 +516,144 @@ bool login_user(void) {
     return found;
 }
 
+void clear_input_buffer(void) {
+    nodelay(stdscr, TRUE);
+    while (getch() != ERR);
+    nodelay(stdscr, FALSE);
+}
+
+void settings_menu(void) {
+    clear();
+    int settings_selected = 0;
+    char *difficulty_levels[] = {"Easy", "Medium", "Hard"};
+    
+    while (1) {
+        clear();
+        mvprintw(4, menu_x - 5, "GAME SETTINGS");
+        
+        // Display current difficulty
+        mvprintw(6, menu_x, "Current Difficulty: %s", difficulty_levels[dif_lvl]);
+        
+        // Display settings options
+        for (int i = 0; i < 2; i++) {
+            if (i == settings_selected && has_colors()) {
+                attron(COLOR_PAIR(2));
+            }
+            
+            mvhline(menu_y[i], menu_x - 2, ' ', 30);
+            
+            if (i == settings_selected) {
+                mvprintw(menu_y[i], menu_x - 2, "->");
+            }
+            
+            if (i == 0) {
+                mvprintw(menu_y[i], menu_x, "%s%s", setting[i], difficulty_levels[dif_lvl]);
+            } else {
+                mvprintw(menu_y[i], menu_x, "%s", setting[i]);
+            }
+            
+            if (i == settings_selected && has_colors()) {
+                attroff(COLOR_PAIR(2));
+            }
+        }
+        
+        mvprintw(14, menu_x - 5, "Press 'b' to go back");
+        refresh();
+        
+        int ch = getch();
+        switch (ch) {
+            case KEY_UP:
+                settings_selected = (settings_selected > 0) ? settings_selected - 1 : 1;
+                break;
+            case KEY_DOWN:
+                settings_selected = (settings_selected < 1) ? settings_selected + 1 : 0;
+                break;
+            case '\n':
+                if (settings_selected == 0) {
+                    dif_lvl = (dif_lvl + 1) % 3;
+                } else if (settings_selected == 1) {
+                    color_settings_menu();
+                }
+                break;
+            case 'b':
+                clear();
+                clear_input_buffer(); // Clear any pending input
+                refresh();
+                return;
+        }
+    }
+}
+
+void color_settings_menu(void) {
+    clear();
+    int ch;
+    
+    // Initialize color pairs if not already done
+    init_pair(1, COLOR_RED, -1);
+    init_pair(2, COLOR_GREEN, -1);
+    init_pair(3, COLOR_MAGENTA, -1);
+    init_pair(4, COLOR_WHITE, -1);
+    init_pair(5, COLOR_BLUE, -1);
+    init_pair(6, COLOR_CYAN, -1);
+    init_pair(7, COLOR_YELLOW, -1);
+
+    while(1) {
+        clear();
+        mvprintw(4, menu_x - 5, "COLOR SETTINGS");
+        mvprintw(5, menu_x - 5, "Use LEFT and RIGHT arrow keys to change color");
+        mvprintw(6, menu_x - 5, "Press ENTER to select, 'b' to go back");
+
+        // Display color name
+        mvprintw(8, menu_x, "Selected color: ");
+        attron(COLOR_PAIR(current_color) | A_BOLD);
+        switch (current_color) {
+            case 1: printw("RED"); break;
+            case 2: printw("GREEN"); break;
+            case 3: printw("MAGENTA"); break;
+            case 4: printw("WHITE"); break;
+            case 5: printw("BLUE"); break;
+            case 6: printw("CYAN"); break;
+            case 7: printw("YELLOW"); break;
+        }
+
+        // Display sample text with selected color
+        mvprintw(10, menu_x - 5, "        @@@@@@@@@@        ");
+        mvprintw(11, menu_x - 5, "      @@        @@@     ");
+        mvprintw(12, menu_x - 5, "     @@   @@@@@@@@@     ");
+        mvprintw(13, menu_x - 5, "    @@  @@@     @@@           ");
+        mvprintw(14, menu_x - 5, "    @@  @@@     @@@       ");
+        mvprintw(15, menu_x - 5, "    @@  @@@     @@@     ");
+        mvprintw(16, menu_x - 5, "     @@  @@@    @@@    ");
+        mvprintw(17, menu_x - 5, "      @@   @@@@@@@@     ");
+        mvprintw(18, menu_x - 5, "       @@             ");        
+        mvprintw(19, menu_x - 5, "         @@@@@@@@@@ ");
+        
+        attroff(COLOR_PAIR(current_color) | A_BOLD);
+        refresh();
+
+        ch = getch();
+        switch(ch) {
+            case KEY_LEFT:
+                if(current_color != 1)
+                    current_color--;
+                else
+                    current_color = 7;
+                break;
+            case KEY_RIGHT:
+                if(current_color != 7)
+                    current_color++;
+                else
+                    current_color = 1;
+                break;
+            case '\n':
+                game_color = current_color;
+                return;
+            case 'b':
+                return;
+        }
+    }
+}
+
 int main(void) {
     initscr();
     noecho();
@@ -504,7 +665,18 @@ int main(void) {
         init_pair(1, COLOR_WHITE, COLOR_BLACK);
         init_pair(2, COLOR_BLACK, COLOR_WHITE);
     }
-
+    if (has_colors()) {
+        start_color();
+        use_default_colors();
+        // Initialize the basic color pair for menu selection
+        init_pair(1, COLOR_RED, -1);
+        init_pair(2, COLOR_GREEN, -1);
+        init_pair(3, COLOR_MAGENTA, -1);
+        init_pair(4, COLOR_WHITE, -1);
+        init_pair(5, COLOR_BLUE, -1);
+        init_pair(6, COLOR_CYAN, -1);
+        init_pair(7, COLOR_YELLOW, -1);
+    }
     draw_menu();
 
     int ch;
@@ -571,15 +743,39 @@ int main(void) {
                 if(selected == 0) {
                     // Start game code here
                     clear();
-                    mvprintw(10, 10, "Starting game...");
+                    mvprintw(3, 12, "Starting game...");
+                    mvprintw(9, 12, "Difficulty: %s", 
+                        dif_lvl == 0 ? "Easy" : 
+                        dif_lvl == 1 ? "Medium" : "Hard");
                     refresh();
-                    getch();
-                } else if(selected == 1) {
-                    // Settings code here
-                    clear();
+                    mvprintw(5,5,"~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+                    mvprintw(7,5,"~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+                    mvprintw(6,4,"|");
+                    mvprintw(6,35,"|");
+                    refresh();
+                    for(int i = 5; i<35; i++){
+                    mvprintw(6,i,"#");
+                    refresh();
+                    int time = (rand()%4)*100;
+                    napms(time);
+                    switch(dif_lvl){
+                        case 0:
+                        break;
+
+                        case 1:
+                        break;
+
+                        case 2:
+                        break;
+                    }
+    }
+                    } else if(selected == 1) {
                     mvprintw(10, 10, "Settings menu...");
+                    settings_menu();
+                    clear_input_buffer();
+                    clear();
+                    n_game();
                     refresh();
-                    getch();
                 }
                 break;
             case 'b':  // Add option to go back

@@ -30,6 +30,10 @@
 #define MAX_ROOM_SIZE 16
 #define MAX_ROOMS 12
 
+#define GOLDEN_KEY 'K'  // Symbol for the golden key
+#define BROKEN_KEY 'k'  // Symbol for broken key
+#define KEY_BREAK_CHANCE 10  // 10% chance of breaking
+
 #define MAP_WIDTH 160
 #define MAP_HEIGHT 40
 #define MAX_INVENTORY 10
@@ -45,10 +49,12 @@ typedef struct {
     int damage;        // For weapons
     bool isEquipped;
     bool isWeapon;
-    int count;         // For stackable weapons (daggers, arrows, wands)
+    int count;         // For stackable items
     int max_stack;     // Maximum number that can be carried
     bool can_throw;    // Whether weapon can be thrown
     int throw_range;   // Maximum throwing range
+    bool isKey;        // New: whether item is a key
+    bool isBroken;     // New: whether key is broken
 } Item;
 
 typedef struct {
@@ -1084,6 +1090,99 @@ void place_food(Room* rooms, int room_count) {
     }
 }
 
+void place_golden_key(Room* rooms, int room_count) {
+    bool key_placed = false;
+    
+    // Try to place the key in a random room
+    while (!key_placed) {
+        int room_index = rand() % room_count;
+        Room room = rooms[room_index];
+        
+        // Try to place the key in this room
+        int attempts = 0;
+        while (attempts < 20 && !key_placed) {
+            int x = room.x + 2 + (rand() % (room.width - 3));
+            int y = room.y + 2 + (rand() % (room.height - 3));
+            
+            if (map[y][x] == FLOOR) {
+                bool is_suitable = true;
+                // Check surrounding area for other items
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dx = -1; dx <= 1; dx++) {
+                        char nearby_tile = map[y + dy][x + dx];
+                        if (nearby_tile != FLOOR && nearby_tile != '#') {
+                            is_suitable = false;
+                            break;
+                        }
+                    }
+                    if (!is_suitable) break;
+                }
+                
+                if (is_suitable) {
+                    map[y][x] = GOLDEN_KEY;
+                    key_placed = true;
+                    break;
+                }
+            }
+            attempts++;
+        }
+    }
+}
+
+bool try_use_golden_key(void) {
+    // Check if key breaks
+    if (rand() % 100 < KEY_BREAK_CHANCE) {
+        // Convert golden key to broken key in inventory
+        for (int i = 0; i < player_inventory.count; i++) {
+            if (player_inventory.items[i].symbol == GOLDEN_KEY && !player_inventory.items[i].isBroken) {
+                player_inventory.items[i].symbol = BROKEN_KEY;
+                player_inventory.items[i].name = "Broken Golden Key";
+                player_inventory.items[i].isBroken = true;
+                mvprintw(40, 1, "The Golden Key broke while using it!");
+                refresh();
+                return true;
+            }
+        }
+    }
+    return true;
+}
+
+void combine_broken_keys(void) {
+    int broken_key_count = 0;
+    int first_key_index = -1;
+    
+    // Count broken keys and find first one
+    for (int i = 0; i < player_inventory.count; i++) {
+        if (player_inventory.items[i].symbol == BROKEN_KEY && player_inventory.items[i].isBroken) {
+            broken_key_count++;
+            if (first_key_index == -1) {
+                first_key_index = i;
+            } else {
+                // Found second key, combine them
+                // Remove second key
+                for (int j = i; j < player_inventory.count - 1; j++) {
+                    player_inventory.items[j] = player_inventory.items[j + 1];
+                }
+                player_inventory.count--;
+                
+                // Convert first key back to golden key
+                player_inventory.items[first_key_index].symbol = GOLDEN_KEY;
+                player_inventory.items[first_key_index].name = "Golden Key";
+                player_inventory.items[first_key_index].isBroken = false;
+                
+                mvprintw(40, 1, "Combined 2 broken keys into a new Golden Key!");
+                refresh();
+                return;
+            }
+        }
+    }
+    
+    if (broken_key_count < 2) {
+        mvprintw(40, 1, "Need 2 broken keys to combine!");
+        refresh();
+    }
+}
+
 void generate_rooms(StairInfo* prev_stair, location* player_pos) {
     current_level.room_count = 0;
     i = 0;
@@ -1168,14 +1267,13 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
         fprintf(stderr, "Error: Could not generate minimum number of rooms\n");
         exit(1);
     }
-
+        place_golden_key(current_level.rooms, current_level.room_count);
     create_corridors(current_level.rooms, current_level.room_count);
     place_doors();
     place_locked_door_and_password(current_level.rooms, current_level.room_count);
     place_gold(current_level.rooms, current_level.room_count);
     place_food(current_level.rooms, current_level.room_count);
     place_weapons(current_level.rooms, current_level.room_count);
-
     // Find the furthest room and set it as treasure room if on level 5
     Room furthest_room;
     if (prev_stair == NULL) {
@@ -1478,6 +1576,8 @@ void throw_weapon(location start, int dx, int dy, int max_range, int damage, boo
     refresh();
 }
 
+
+
 int main() {
     initscr();
     init_map();
@@ -1582,7 +1682,9 @@ int main() {
                          map[new_y][new_x] == MAGIC_WAND_SYMBOL ||
                          map[new_y][new_x] == ARROW_SYMBOL ||
                          map[new_y][new_x] == PASSWORD_SYMBOL ||
-                         map[new_y][new_x] == LOCKED_DOOR
+                         map[new_y][new_x] == LOCKED_DOOR ||
+                         map[new_y][new_x] == GOLDEN_KEY||
+                         map[new_y][new_x] == BROKEN_KEY
                          )) {
                         
                         // Clear old position
@@ -1600,7 +1702,23 @@ int main() {
                         mvprintw(38, 2, "Password: %s", current_password);
                         attroff(COLOR_PAIR(2) | A_BOLD);
                         }                    
-else if (new_x == locked_door_location.x && new_y == locked_door_location.y && !door_unlocked) {
+if (new_x == locked_door_location.x && new_y == locked_door_location.y && !door_unlocked) {
+    // Check for golden key first
+    bool has_key = false;
+    for (int i = 0; i < player_inventory.count; i++) {
+        if (player_inventory.items[i].symbol == GOLDEN_KEY && !player_inventory.items[i].isBroken) {
+            has_key = true;
+            if (try_use_golden_key()) {
+                door_unlocked = true;
+                player_inventory.items[i].isBroken = true;
+                map[locked_door_location.y][locked_door_location.x] = DOOR;
+                mvprintw(40, 1, "Unlocked door with Golden Key!");
+                refresh();
+                break;
+            }
+        }
+    }
+    if(!has_key){
     // Clear any existing messages
     move(38, 1);
     clrtoeol();
@@ -1654,7 +1772,7 @@ else if (new_x == locked_door_location.x && new_y == locked_door_location.y && !
     
     refresh();
 }
-
+}
 
                         // Check for trap
                         if (trap_locations[player.y][player.x] && !revealed_traps[player.y][player.x]) {
@@ -1689,6 +1807,23 @@ else if (new_x == locked_door_location.x && new_y == locked_door_location.y && !
         mvprintw(40, 1, "Inventory full! Cannot pick up food!");
     }
 }
+
+else if (map[player.y][player.x] == GOLDEN_KEY) {
+    if (player_inventory.count < MAX_INVENTORY) {
+        map[player.y][player.x] = FLOOR;
+        Item* new_key = &player_inventory.items[player_inventory.count];
+        new_key->symbol = GOLDEN_KEY;
+        new_key->name = "Golden Key";
+        new_key->isWeapon = false;
+        new_key->isKey = true;
+        new_key->isBroken = false;
+        player_inventory.count++;
+        mvprintw(40, 1, "Picked up a Golden Key!");
+    } else {
+        mvprintw(40, 1, "Inventory full! Cannot pick up Golden Key!");
+    }
+}
+
 else if (map[player.y][player.x] == SWORD_SYMBOL ||
          map[player.y][player.x] == DAGGER_SYMBOL ||
          map[player.y][player.x] == MAGIC_WAND_SYMBOL ||
@@ -1756,6 +1891,11 @@ case 't': // Throw weapon
                 else if(ch == 'd'){
                     drop_item();
                 }
+                        else if(ch == 'c'){  // Combine broken keys
+            combine_broken_keys();
+            display_inventory();
+        }
+
     }
     // Redraw the game screen
             clear();

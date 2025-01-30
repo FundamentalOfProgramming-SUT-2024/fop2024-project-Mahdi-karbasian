@@ -20,10 +20,10 @@
 #define TRAP_HIDDEN '.'    // Hidden trap symbol (will not be displayed until triggered)
 #define TRAP_VISIBLE '^'   // Visible trap symbol (shown after triggering)
 #define TRAP_DAMAGE 10     // Damage dealt by traps
-#define MAX_HEALTH 100     // Maximum player health
+#define MAX_HEALTH 1000     // Maximum player health
 #define FOOD '8'
 #define SWORD_SYMBOL 'I'
-#define DAGGER_SYMBOL 'D'
+#define DAGGER_SYMBOL 'd'
 #define MAGIC_WAND_SYMBOL '%'
 #define ARROW_SYMBOL 'V'
 #define MIN_ROOM_SIZE 4
@@ -41,6 +41,49 @@
 #define PASSWORD_SYMBOL '?' // Symbol for password location
 #define LOCKED_DOOR '=' // Symbol for locked door
 #define PASSWORD_LENGTH 4 // Length of generated password
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
+#define MAX_ENEMIES 50
+#define ENEMY_DEMON 'D'
+#define ENEMY_FIRE 'F'
+#define ENEMY_GIANT 'G'
+#define ENEMY_SNAKE 'S'
+#define ENEMY_UNDEAD 'U'
+
+// Enemy spawn rate controls
+#define SPAWN_RATE_VERY_LOW  0.2f   // 20% chance per room
+#define SPAWN_RATE_LOW       0.4f   // 40% chance per room
+#define SPAWN_RATE_NORMAL    0.7f   // 70% chance per room (original value)
+#define SPAWN_RATE_HIGH      0.85f  // 85% chance per room
+#define SPAWN_RATE_VERY_HIGH 1.0f   // 100% chance per room
+
+#define MAX_ENEMIES_VERY_LOW  1     // Max enemies per room
+#define MAX_ENEMIES_LOW       2
+#define MAX_ENEMIES_NORMAL    3     // Original value
+#define MAX_ENEMIES_HIGH      4
+#define MAX_ENEMIES_VERY_HIGH 5
+
+// Global spawn rate controls
+
+
+typedef struct {
+    char type;          // D, F, G, S, or U
+    int x, y;          // Position
+    int health;        // Current health
+    int max_health;    // Maximum health
+    int damage;        // Damage dealt to player
+    int follow_count;  // How many more moves to follow (for G and U)
+    bool is_tracking;  // Whether currently tracking the player
+    bool is_active;    // Whether the enemy is alive
+    bool is_paralyzed;     // From your original enemy struct
+    int paralysis_duration; // From your original enemy struct
+} Enemy;
+
+typedef struct {
+    Enemy enemies[MAX_ENEMIES];
+    int count;
+} EnemyList;
+
+EnemyList current_enemies;
 
 typedef struct {
     char symbol;
@@ -110,14 +153,6 @@ Item dagger;
 Item arrow;
 Item Magic_wand;
 
-typedef struct {
-    int x;
-    int y;
-    bool is_paralyzed;
-    int paralysis_duration;
-} Enemy;
-
-
 char map[MAP_HEIGHT][MAP_WIDTH];
 location spawn;
 int i = 0;
@@ -132,10 +167,13 @@ bool password_shown = false;
 time_t password_show_time = 0;
 location password_location;
 location locked_door_location;
+float current_spawn_rate = 0.3f;
+int enemy_spawn_level = 3;
 bool door_unlocked = false;
 void generate_password(void);
 void throw_weapon(location start, int dx, int dy, int max_range, int damage, bool drops_after_hit);
 void remove_item_from_inventory(Item* item);
+void damage_enemy(int x, int y, int damage);
 void attack_with_weapon(location player, char weapon_type, int direction_x, int direction_y);
 void handle_attack(int key);
 
@@ -325,6 +363,11 @@ bool can_pickup_weapon(char weapon_symbol) {
     return true;
 }
 
+bool is_point_in_room(int x, int y, Room room) {
+    return (x >= room.x && x <= room.x + room.width &&
+            y >= room.y && y <= room.y + room.height);
+}
+
 void pickup_weapon(char weapon_symbol, int x, int y) {
     if (!can_pickup_weapon(weapon_symbol)) {
         mvprintw(40, 1, "Cannot pick up more of this weapon type!");
@@ -464,7 +507,238 @@ void display_inventory() {
     mvprintw(row + 4, 1, "Press 'i' to close inventory");
     refresh();
 }
+void init_enemy(Enemy* enemy, char type) {
+    enemy->type = type;
+    enemy->is_active = true;
+    enemy->is_tracking = false;
+    enemy->follow_count = 0;
+    
+    switch(type) {
+        case ENEMY_DEMON:
+            enemy->max_health = enemy->health = 5;
+            enemy->damage = 5;
+            break;
+        case ENEMY_FIRE:
+            enemy->max_health = enemy->health = 10;
+            enemy->damage = 8;
+            break;
+        case ENEMY_GIANT:
+            enemy->max_health = enemy->health = 15;
+            enemy->damage = 10;
+            enemy->follow_count = 5;
+            break;
+        case ENEMY_SNAKE:
+            enemy->max_health = enemy->health = 20;
+            enemy->damage = 12;
+            break;
+        case ENEMY_UNDEAD:
+            enemy->max_health = enemy->health = 30;
+            enemy->damage = 15;
+            enemy->follow_count = 5;
+            break;
+    }
+}
 
+// Place enemies in a room
+void place_enemies_in_room(Room room) {
+    // Basic safety checks
+    if (room.width < 5 || room.height < 5 || current_enemies.count >= MAX_ENEMIES) {
+        return;
+    }
+
+    // Ensure spawn rate is within valid range
+    if (current_spawn_rate < 0.0f) current_spawn_rate = 0.0f;
+    if (current_spawn_rate > 1.0f) current_spawn_rate = 1.0f;
+
+    // Calculate safe area for enemy placement
+    int safe_width = room.width - 4;  // Leave 2 tiles buffer on each side
+    int safe_height = room.height - 4; // Leave 2 tiles buffer on each side
+
+    // Safety check for room size
+    if (safe_width <= 0 || safe_height <= 0) {
+        return;
+    }
+
+    // Check spawn chance
+    int spawn_chance = (int)(current_spawn_rate * 100.0f);
+    if (spawn_chance <= 0 || (rand() % 100) >= spawn_chance) {
+        return;
+    }
+
+    // Calculate number of enemies based on room size and max setting
+    int room_size_max = (safe_width * safe_height) / 16;
+    if (room_size_max <= 0) room_size_max = 1;
+    if (room_size_max > enemy_spawn_level) room_size_max = enemy_spawn_level;
+
+    int num_enemies = 1 + (rand() % room_size_max);
+    if (num_enemies > MAX_ENEMIES - current_enemies.count) {
+        num_enemies = MAX_ENEMIES - current_enemies.count;
+    }
+
+    for (int i = 0; i < num_enemies; i++) {
+        int attempts = 0;
+        const int MAX_ATTEMPTS = 20;
+        
+        while (attempts < MAX_ATTEMPTS) {
+            // Ensure we're placing within the safe area
+            int x = room.x + 2 + (rand() % safe_width);
+            int y = room.y + 2 + (rand() % safe_height);
+            
+            // Verify coordinates are within map bounds
+            if (x <= 1 || x >= MAP_WIDTH - 2 || y <= 1 || y >= MAP_HEIGHT - 2) {
+                attempts++;
+                continue;
+            }
+
+            if (map[y][x] == FLOOR) {
+                bool space_is_clear = true;
+                
+                // Check surrounding area
+                for (int dy = -1; dy <= 1 && space_is_clear; dy++) {
+                    for (int dx = -1; dx <= 1; dx++) {
+                        int check_y = y + dy;
+                        int check_x = x + dx;
+                        
+                        // Verify we're not checking outside map bounds
+                        if (check_x < 0 || check_x >= MAP_WIDTH || 
+                            check_y < 0 || check_y >= MAP_HEIGHT) {
+                            space_is_clear = false;
+                            break;
+                        }
+                        
+                        char tile = map[check_y][check_x];
+                        if (tile != FLOOR && tile != '#') {
+                            space_is_clear = false;
+                            break;
+                        }
+                    }
+                }
+                
+                if (space_is_clear && current_enemies.count < MAX_ENEMIES) {
+                    Enemy* new_enemy = &current_enemies.enemies[current_enemies.count];
+                    
+                    // Randomly select enemy type
+                    char enemy_types[] = {ENEMY_DEMON, ENEMY_FIRE, ENEMY_GIANT, 
+                                        ENEMY_SNAKE, ENEMY_UNDEAD};
+                    char type = enemy_types[rand() % 5];
+                    
+                    init_enemy(new_enemy, type);
+                    new_enemy->x = x;
+                    new_enemy->y = y;
+                    map[y][x] = type;
+                    
+                    current_enemies.count++;
+                    break;
+                }
+            }
+            attempts++;
+        }
+    }
+}
+
+void set_enemy_spawn_rate(char difficulty) {
+    if (difficulty >= '1' && difficulty <= '5') {
+        enemy_spawn_level = difficulty - '0';
+        mvprintw(40, 1, "Enemy spawn rate set to level %d", enemy_spawn_level);
+        refresh();
+    }
+}
+// Move enemy towards player
+bool move_enemy(Enemy* enemy, int player_x, int player_y) {
+    if (!enemy || !enemy->is_active) return false;
+    
+    // Calculate direction to move
+    int dx = (player_x > enemy->x) ? 1 : (player_x < enemy->x) ? -1 : 0;
+    int dy = (player_y > enemy->y) ? 1 : (player_y < enemy->y) ? -1 : 0;
+    
+    // Safety checks for boundaries
+    if (enemy->x + dx <= 0 || enemy->x + dx >= MAP_WIDTH - 1 ||
+        enemy->y + dy <= 0 || enemy->y + dy >= MAP_HEIGHT - 1) {
+        return false;
+    }
+    
+    // Try horizontal movement first
+    if (dx != 0 && map[enemy->y][enemy->x + dx] == FLOOR) {
+        map[enemy->y][enemy->x] = FLOOR;
+        enemy->x += dx;
+        map[enemy->y][enemy->x] = enemy->type;
+        return true;
+    }
+    
+    // Try vertical movement
+    if (dy != 0 && map[enemy->y + dy][enemy->x] == FLOOR) {
+        map[enemy->y][enemy->x] = FLOOR;
+        enemy->y += dy;
+        map[enemy->y][enemy->x] = enemy->type;
+        return true;
+    }
+    
+    if (enemy->type == ENEMY_SNAKE){
+            if (enemy->x + dx <= 0 || enemy->x + dx >= MAP_WIDTH - 1 ||
+        enemy->y + dy <= 0 || enemy->y + dy >= MAP_HEIGHT - 1) {
+        return false;
+    }
+    
+    // Try horizontal movement first
+    if (dx != 0 && (map[enemy->y][enemy->x + dx] == FLOOR || map[enemy->y][enemy->x + dx] == DOOR || map[enemy->y][enemy->x + dx] == '#')) {
+        if(map[enemy->y][enemy->x + dx] == FLOOR){
+        map[enemy->y][enemy->x] = FLOOR;
+        enemy->x += dx;
+        map[enemy->y][enemy->x] = enemy->type;
+        return true;
+    }
+        else if(map[enemy->y][enemy->x + dx] == DOOR){
+        map[enemy->y][enemy->x] = DOOR;
+        enemy->x += dx;
+        map[enemy->y][enemy->x] = enemy->type;
+        return true;
+    }
+        else if(map[enemy->y][enemy->x + dx] == '#'){
+        map[enemy->y][enemy->x] = '#';
+        enemy->x += dx;
+        map[enemy->y][enemy->x] = enemy->type;
+        return true;
+    }
+    }
+    // Try vertical movement
+    if (dy != 0 && map[enemy->y + dy][enemy->x] == FLOOR) {
+        map[enemy->y][enemy->x] = FLOOR;
+        enemy->y += dy;
+        map[enemy->y][enemy->x] = enemy->type;
+        return true;
+    }
+    }
+
+    return false;
+}
+// Update enemy tracking status
+void update_enemy_tracking(Enemy* enemy, int player_x, int player_y) {
+    if (!enemy->is_active) return;
+    
+    // Check if player is in same room
+    bool same_room = false;
+    for (int i = 0; i < current_level.room_count; i++) {
+        Room room = current_level.rooms[i];
+        if (player_x >= room.x && player_x <= room.x + room.width &&
+            player_y >= room.y && player_y <= room.y + room.height &&
+            enemy->x >= room.x && enemy->x <= room.x + room.width &&
+            enemy->y >= room.y && enemy->y <= room.y + room.height) {
+            same_room = true;
+            break;
+        }
+    }
+    
+    if (same_room) {
+        enemy->is_tracking = true;
+        if (enemy->type == ENEMY_SNAKE) {
+            // Snake always tracks
+            enemy->follow_count = INT_MAX;
+        } else if ((enemy->type == ENEMY_GIANT || enemy->type == ENEMY_UNDEAD) && 
+                   enemy->follow_count <= 0) {
+            enemy->follow_count = 5;
+        }
+    }
+}
 void clrtoline() {
     int y, x;
     getyx(stdscr, y, x);
@@ -1185,6 +1459,7 @@ void combine_broken_keys(void) {
 
 void generate_rooms(StairInfo* prev_stair, location* player_pos) {
     current_level.room_count = 0;
+    current_enemies.count = 0;
     i = 0;
     int attempts = 0;
     const int MAX_ATTEMPTS = 1000;
@@ -1274,6 +1549,9 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
     place_gold(current_level.rooms, current_level.room_count);
     place_food(current_level.rooms, current_level.room_count);
     place_weapons(current_level.rooms, current_level.room_count);
+    for (int i = 0; i < current_level.room_count; i++) {
+    place_enemies_in_room(current_level.rooms[i]);
+}
     // Find the furthest room and set it as treasure room if on level 5
     Room furthest_room;
     if (prev_stair == NULL) {
@@ -1348,9 +1626,37 @@ void draw_map() {
                         break;
                 }
                 
-                attron(COLOR_PAIR(color_pair));
+                // Check if the current character is an enemy and set its color
+                if (map[y][x] == ENEMY_DEMON) {
+                    attron(COLOR_PAIR(10));
+                }
+                else if (map[y][x] == ENEMY_FIRE) {
+                    attron(COLOR_PAIR(11));
+                }
+                else if (map[y][x] == ENEMY_GIANT) {
+                    attron(COLOR_PAIR(12));
+                }
+                else if (map[y][x] == ENEMY_SNAKE) {
+                    attron(COLOR_PAIR(13));
+                }
+                else if (map[y][x] == ENEMY_UNDEAD) {
+                    attron(COLOR_PAIR(14));
+                }
+                else {
+                    attron(COLOR_PAIR(color_pair));
+                }
+                
+                // Draw the character
                 mvprintw(y, x, "%c", map[y][x]);
-                attroff(COLOR_PAIR(color_pair));
+                
+                // Turn off enemy colors if it was an enemy
+                if (map[y][x] >= ENEMY_DEMON && map[y][x] <= ENEMY_UNDEAD) {
+                    attroff(COLOR_PAIR(10) | COLOR_PAIR(11) | COLOR_PAIR(12) | 
+                           COLOR_PAIR(13) | COLOR_PAIR(14));
+                }
+                else {
+                    attroff(COLOR_PAIR(color_pair));
+                }
             }
         }
     }
@@ -1411,8 +1717,15 @@ void attack_with_weapon(location player, char weapon_type, int direction_x, int 
                     
                     // Check for enemies and apply damage
                     int damage = (weapon_type == 'M') ? 5 : 10;
-                    // Apply damage to enemy if present
-                    // TODO: Add enemy handling code
+                    
+                    // Check if target location contains an enemy
+                    if (map[target_y][target_x] == ENEMY_DEMON ||
+                        map[target_y][target_x] == ENEMY_FIRE ||
+                        map[target_y][target_x] == ENEMY_GIANT ||
+                        map[target_y][target_x] == ENEMY_SNAKE ||
+                        map[target_y][target_x] == ENEMY_UNDEAD) {
+                        damage_enemy(target_x, target_y, damage);
+                    }
                 }
             }
             break;
@@ -1423,7 +1736,6 @@ void attack_with_weapon(location player, char weapon_type, int direction_x, int 
             
         case '%': // Magic Wand
             throw_weapon(player, direction_x, direction_y, 10, 15, false);
-            // Add paralysis effect
             break;
             
         case 'V': // Arrow
@@ -1494,18 +1806,13 @@ void throw_weapon(location start, int dx, int dy, int max_range, int damage, boo
     int current_x = start.x;
     int current_y = start.y;
     int distance = 0;
-    char previous_tile;
-    
-    // Keep track of the last valid position where the weapon could be dropped
-    int last_valid_x = start.x;
-    int last_valid_y = start.y;
-    char last_valid_tile = map[start.y][start.x];
+    bool hit_enemy = false;
     
     // Store the original map state
     char original_map[MAP_HEIGHT][MAP_WIDTH];
     memcpy(original_map, map, sizeof(map));
     
-    while (distance < max_range) {
+    while (distance < max_range && !hit_enemy) {
         int next_x = current_x + dx;
         int next_y = current_y + dy;
         distance++;
@@ -1518,53 +1825,47 @@ void throw_weapon(location start, int dx, int dy, int max_range, int damage, boo
         
         current_x = next_x;
         current_y = next_y;
-        previous_tile = map[current_y][current_x];
         
-        // Update last valid position if this spot is floor or corridor
-        if (map[current_y][current_x] == FLOOR || map[current_y][current_x] == '#') {
-            last_valid_x = current_x;
-            last_valid_y = current_y;
-            last_valid_tile = previous_tile;
+        // Check for enemy hit
+        if (map[current_y][current_x] == ENEMY_DEMON ||
+            map[current_y][current_x] == ENEMY_FIRE ||
+            map[current_y][current_x] == ENEMY_GIANT ||
+            map[current_y][current_x] == ENEMY_SNAKE ||
+            map[current_y][current_x] == ENEMY_UNDEAD) {
+            
+            damage_enemy(current_x, current_y, damage);
+            hit_enemy = true;
+            break;
         }
         
         // Check for walls or obstacles
         if (map[current_y][current_x] == VERTICAL || 
             map[current_y][current_x] == HORIZ || 
             map[current_y][current_x] == PILLAR ||
-            map[current_y][current_x] == DOOR)  {
+            map[current_y][current_x] == DOOR) {
             break;
         }
         
-        // Restore previous frame
+        // Animation
         memcpy(map, original_map, sizeof(map));
-        
-        // Draw the projectile
         attron(COLOR_PAIR(2) | A_BOLD);
         mvprintw(current_y, current_x, "*");
         attroff(COLOR_PAIR(2) | A_BOLD);
-        
-        // Redraw the player to ensure they remain visible
-        attron(COLOR_PAIR(2) | A_BOLD);
-        mvprintw(start.y, start.x, "@");
-        attroff(COLOR_PAIR(2) | A_BOLD);
-        
         refresh();
-        napms(100); // Increased delay for better visibility
+        napms(50);
     }
     
     // Restore original map state
     memcpy(map, original_map, sizeof(map));
     
-    // Drop the weapon at the last valid position if it's a throwable weapon
-    if (drops_after_hit) {
-        if (map[last_valid_y][last_valid_x] == FLOOR || map[last_valid_y][last_valid_x] == '#') {
-            map[last_valid_y][last_valid_x] = DAGGER_SYMBOL;
-        } else {
-            map[start.y][start.x] = DAGGER_SYMBOL;
+    // Drop the weapon if it didn't hit anything and is supposed to drop
+    if (!hit_enemy && drops_after_hit) {
+        if (map[current_y][current_x] == FLOOR || map[current_y][current_x] == '#') {
+            map[current_y][current_x] = DAGGER_SYMBOL;
         }
     }
     
-    // Final map update
+    // Redraw everything
     draw_map();
     draw_borders();
     
@@ -1572,11 +1873,34 @@ void throw_weapon(location start, int dx, int dy, int max_range, int damage, boo
     attron(COLOR_PAIR(2) | A_BOLD);
     mvprintw(player.y, player.x, "@");
     attroff(COLOR_PAIR(2) | A_BOLD);
-    
     refresh();
 }
 
-
+// Add this function to handle enemy damage
+void damage_enemy(int x, int y, int damage) {
+    for (int i = 0; i < current_enemies.count; i++) {
+        Enemy* enemy = &current_enemies.enemies[i];
+        if (enemy->is_active && enemy->x == x && enemy->y == y) {
+            enemy->health -= damage;
+            
+            // Display damage message
+            attron(COLOR_PAIR(4) | A_BOLD);
+            mvprintw(39, 1, "You hit %c for %d damage! (%d/%d HP)", 
+                    enemy->type, damage, enemy->health, enemy->max_health);
+            attroff(COLOR_PAIR(4) | A_BOLD);
+            
+            if (enemy->health <= 0) {
+                enemy->is_active = false;
+                map[enemy->y][enemy->x] = FLOOR;
+                attron(COLOR_PAIR(4) | A_BOLD);
+                mvprintw(38, 1, "You defeated the %c!", enemy->type);
+                attroff(COLOR_PAIR(4) | A_BOLD);
+            }
+            refresh();
+            break;
+        }
+    }
+}
 
 int main() {
     initscr();
@@ -1608,7 +1932,11 @@ int main() {
         init_pair(6, COLOR_WHITE, -1);             // For regular rooms
         init_pair(7, COLOR_MAGENTA, -1);           // For enchant rooms
         init_pair(8, COLOR_GREEN, -1);
-
+        init_pair(10, COLOR_RED, -1);     // For Demon
+        init_pair(11, COLOR_YELLOW, -1);  // For Fire Monster
+        init_pair(12, COLOR_GREEN, -1);   // For Giant
+        init_pair(13, COLOR_BLUE, -1);    // For Snake
+        init_pair(14, COLOR_MAGENTA, -1); // For Undead
     srand(time(NULL));
     time_t game_start_time = time(NULL);
 
@@ -1624,7 +1952,8 @@ int main() {
     
     //location player = {0, 0}; // Initialize player position
     player_health = MAX_HEALTH;
-    
+    current_enemies.count = 0;
+    memset(current_enemies.enemies, 0, sizeof(current_enemies.enemies));
     generate_rooms(prev_stair, &player);
 
     draw_borders();
@@ -1684,7 +2013,12 @@ int main() {
                          map[new_y][new_x] == PASSWORD_SYMBOL ||
                          map[new_y][new_x] == LOCKED_DOOR ||
                          map[new_y][new_x] == GOLDEN_KEY||
-                         map[new_y][new_x] == BROKEN_KEY
+                         map[new_y][new_x] == BROKEN_KEY ||
+                         map[new_y][new_x] == ENEMY_DEMON ||
+                         map[new_y][new_x] == ENEMY_FIRE ||
+                         map[new_y][new_x] == ENEMY_GIANT ||
+                         map[new_y][new_x] == ENEMY_SNAKE ||
+                         map[new_y][new_x] == ENEMY_UNDEAD
                          )) {
                         
                         // Clear old position
@@ -2029,6 +2363,36 @@ case 't': // Throw weapon
             }
         }
         }
+// In your main game loop, where you update enemies:
+for (int i = 0; i < current_enemies.count && i < MAX_ENEMIES; i++) {
+    Enemy* enemy = &current_enemies.enemies[i];
+    if (!enemy || !enemy->is_active) continue;
+    
+    // Update tracking status
+    update_enemy_tracking(enemy, player.x, player.y);
+    
+    // Move enemy if tracking
+    if (enemy->is_tracking) {
+        // Check if enemy is adjacent to player
+        if (abs(enemy->x - player.x) <= 1 && abs(enemy->y - player.y) <= 1) {
+            // Attack player
+            player_health -= enemy->damage;
+            attron(COLOR_PAIR(4) | A_BOLD);
+            mvprintw(40, 1, "%c attacks you for %d damage!", enemy->type, enemy->damage);
+            attroff(COLOR_PAIR(4) | A_BOLD);
+        } else {
+            // Move enemy
+            if (move_enemy(enemy, player.x, player.y)) {
+                if (enemy->type != ENEMY_SNAKE) {
+                    enemy->follow_count--;
+                    if (enemy->follow_count <= 0) {
+                        enemy->is_tracking = false;
+                    }
+                }
+            }
+        }
+    }
+}
         // Update status lines
         update_status_line(score, level, player_health, player, game_start_time);
         draw_borders();

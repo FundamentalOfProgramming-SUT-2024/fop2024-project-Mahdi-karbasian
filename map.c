@@ -120,6 +120,7 @@ typedef struct {
     int width;
     int height;
     int room_type; //1=treasure 2=enchant 3=regular
+    bool visited;
 } Room;
 
 typedef struct {
@@ -147,6 +148,7 @@ typedef struct{
     int max_amount;
 } weapon;
 */
+
 Item mace;
 Item sword;
 Item dagger;
@@ -170,12 +172,14 @@ location locked_door_location;
 float current_spawn_rate = 0.3f;
 int enemy_spawn_level = 3;
 bool door_unlocked = false;
+bool visited_tiles[MAP_HEIGHT][MAP_WIDTH] = {false};
 void generate_password(void);
 void throw_weapon(location start, int dx, int dy, int max_range, int damage, bool drops_after_hit);
 void remove_item_from_inventory(Item* item);
 void damage_enemy(int x, int y, int damage);
 void attack_with_weapon(location player, char weapon_type, int direction_x, int direction_y);
 void handle_attack(int key);
+void draw_borders(void);
 
 
 void init_map() {
@@ -1457,6 +1461,142 @@ void combine_broken_keys(void) {
     }
 }
 
+void vision(void) {
+    // Save any messages from lines 37-42 before clearing
+    char messages[6][MAP_WIDTH];
+    for(int i = 37; i <= 42; i++) {
+        mvinnstr(i, 0, messages[i-37], MAP_WIDTH-1);
+    }
+    
+    clear();
+    
+    // Define vision radius
+    const int VISION_RADIUS = 5;
+    
+    // Mark current visible tiles as visited
+    for(int dy = -VISION_RADIUS; dy <= VISION_RADIUS; dy++) {
+        for(int dx = -VISION_RADIUS; dx <= VISION_RADIUS; dx++) {
+            int new_y = player.y + dy;
+            int new_x = player.x + dx;
+            
+            if(new_x >= 0 && new_x < MAP_WIDTH && new_y >= 0 && new_y < MAP_HEIGHT) {
+                visited_tiles[new_y][new_x] = true;
+            }
+        }
+    }
+    
+    // First draw all visited areas (rooms and corridors)
+    for(int y = 0; y < MAP_HEIGHT; y++) {
+        for(int x = 0; x < MAP_WIDTH; x++) {
+            if(visited_tiles[y][x]) {
+                // Check if this position is in a room
+                bool in_room = false;
+                int room_type = 0;
+                
+                for(int i = 0; i < current_level.room_count; i++) {
+                    Room* room = &current_level.rooms[i];
+                    if(x >= room->x && x <= room->x + room->width &&
+                       y >= room->y && y <= room->y + room->height) {
+                        in_room = true;
+                        room_type = room->room_type;
+                        break;
+                    }
+                }
+                
+                // Set appropriate color
+                int color_pair;
+                if(in_room) {
+                    switch(room_type) {
+                        case 1: color_pair = 5; break; // Treasure room
+                        case 2: color_pair = 7; break; // Enchant room
+                        default: color_pair = 6; break; // Regular room
+                    }
+                } else {
+                    color_pair = 6; // Use regular room color for corridors
+                }
+                
+                attron(COLOR_PAIR(color_pair));
+                mvprintw(y, x, "%c", map[y][x]);
+                attroff(COLOR_PAIR(color_pair));
+            }
+        }
+    }
+    
+    // Draw current vision area (this will overlap visited areas)
+    int start_y = player.y - VISION_RADIUS;
+    int end_y = player.y + VISION_RADIUS;
+    int start_x = player.x - VISION_RADIUS;
+    int end_x = player.x + VISION_RADIUS;
+    
+    // Ensure boundaries are within map limits
+    start_y = (start_y < 0) ? 0 : start_y;
+    end_y = (end_y >= MAP_HEIGHT) ? MAP_HEIGHT - 1 : end_y;
+    start_x = (start_x < 0) ? 0 : start_x;
+    end_x = (end_x >= MAP_WIDTH) ? MAP_WIDTH - 1 : end_x;
+    
+    // Draw current vision area with brighter colors
+    for(int y = start_y; y <= end_y; y++) {
+        for(int x = start_x; x <= end_x; x++) {
+            if (map[y][x] >= ENEMY_DEMON && map[y][x] <= ENEMY_UNDEAD) {
+                switch(map[y][x]) {
+                    case ENEMY_DEMON:  attron(COLOR_PAIR(10)); break;
+                    case ENEMY_FIRE:   attron(COLOR_PAIR(11)); break;
+                    case ENEMY_GIANT:  attron(COLOR_PAIR(12)); break;
+                    case ENEMY_SNAKE:  attron(COLOR_PAIR(13)); break;
+                    case ENEMY_UNDEAD: attron(COLOR_PAIR(14)); break;
+                }
+                mvprintw(y, x, "%c", map[y][x]);
+                attroff(COLOR_PAIR(10) | COLOR_PAIR(11) | COLOR_PAIR(12) | 
+                       COLOR_PAIR(13) | COLOR_PAIR(14));
+            } else {
+                // Check if in room for coloring
+                bool in_room = false;
+                int room_type = 0;
+                for (int i = 0; i < current_level.room_count; i++) {
+                    if (x >= current_level.rooms[i].x && 
+                        x <= current_level.rooms[i].x + current_level.rooms[i].width &&
+                        y >= current_level.rooms[i].y && 
+                        y <= current_level.rooms[i].y + current_level.rooms[i].height) {
+                        in_room = true;
+                        room_type = current_level.rooms[i].room_type;
+                        break;
+                    }
+                }
+                
+                int color_pair;
+                if(in_room) {
+                    switch(room_type) {
+                        case 1: color_pair = 5; break;
+                        case 2: color_pair = 7; break;
+                        default: color_pair = 6; break;
+                    }
+                } else {
+                    color_pair = 6; // Use regular color for corridors
+                }
+                
+                attron(COLOR_PAIR(color_pair) | A_BOLD); // Add A_BOLD for current vision
+                mvprintw(y, x, "%c", map[y][x]);
+                attroff(COLOR_PAIR(color_pair) | A_BOLD);
+            }
+        }
+    }
+    
+    // Draw player
+    attron(COLOR_PAIR(2) | A_BOLD);
+    mvprintw(player.y, player.x, "@");
+    attroff(COLOR_PAIR(2) | A_BOLD);
+    
+    // Draw borders
+    draw_borders();
+    
+    // Restore messages
+    for(int i = 37; i <= 42; i++) {
+        mvprintw(i, 0, "%s", messages[i-37]);
+    }
+    
+    refresh();
+}
+
 void generate_rooms(StairInfo* prev_stair, location* player_pos) {
     current_level.room_count = 0;
     current_enemies.count = 0;
@@ -1474,7 +1614,7 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
         first_room.y = prev_stair->original_y;
         first_room.width = prev_stair->room.width;
         first_room.height = prev_stair->room.height;
-        
+        first_room.visited = false;
         current_level.rooms[current_level.room_count] = first_room;
         draw_room(first_room);
         place_pillars(first_room);
@@ -1493,7 +1633,7 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
         Room new_room;
         new_room.width = MIN_ROOM_SIZE + (rand() % (MAX_ROOM_SIZE - MIN_ROOM_SIZE));
         new_room.height = MIN_ROOM_SIZE + (rand() % (MAX_ROOM_SIZE - MIN_ROOM_SIZE));
-
+        new_room.visited = false;
         new_room.x = 3 + (rand() % (MAP_WIDTH - new_room.width - 6));
         new_room.y = 3 + (rand() % (MAP_HEIGHT - new_room.height - 6));
 
@@ -1866,7 +2006,8 @@ void throw_weapon(location start, int dx, int dy, int max_range, int damage, boo
     }
     
     // Redraw everything
-    draw_map();
+    //draw_map();
+    vision();
     draw_borders();
     
     // Ensure player is still visible
@@ -1957,7 +2098,8 @@ int main() {
     generate_rooms(prev_stair, &player);
 
     draw_borders();
-    draw_map();
+    vision();
+    //draw_map();
     player.x = doors[0].x;  // Set initial player position to first door
     player.y = doors[0].y;
     attron(COLOR_PAIR(2));
@@ -2234,7 +2376,8 @@ case 't': // Throw weapon
     // Redraw the game screen
             clear();
             draw_borders();
-            draw_map();
+            vision();
+            //draw_map();
             update_status_line(score, level, player_health, player, game_start_time);
             break;
 
@@ -2353,7 +2496,8 @@ case 't': // Throw weapon
                 map[player.y][player.x] = FLOOR;  // Remove stair symbol at player position
                 
                 draw_borders();
-                draw_map();
+                vision();
+                //draw_map();
                 mvprintw(42, 1, "Date/Time (UTC): %s", datetime);
                 update_status_line(score, level, player_health, player, game_start_time);
                 attron(COLOR_PAIR(2) | A_BOLD);
@@ -2396,7 +2540,8 @@ for (int i = 0; i < current_enemies.count && i < MAX_ENEMIES; i++) {
         // Update status lines
         update_status_line(score, level, player_health, player, game_start_time);
         draw_borders();
-        draw_map();
+        vision();
+        //draw_map();
 
         // Draw revealed traps
         for (int y = 0; y < MAP_HEIGHT; y++) {

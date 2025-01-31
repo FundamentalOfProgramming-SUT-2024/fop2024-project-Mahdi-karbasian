@@ -1605,7 +1605,7 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
     const int MAX_ATTEMPTS = 1000;
     const int MIN_ROOMS = 6;
     static int current_level_number = 1;  // Add this to track the level number
-    
+    memset(visited_tiles, 0, sizeof(visited_tiles));
     // If we have previous stair info, create the first room in exactly the same position
     if (prev_stair != NULL) {
         Room first_room = prev_stair->room;

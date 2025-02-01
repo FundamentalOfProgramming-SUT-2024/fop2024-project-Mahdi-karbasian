@@ -197,6 +197,9 @@ bool visited_tiles[MAP_HEIGHT][MAP_WIDTH] = {false};
 int speed_potion_moves = 0;
 const int SPEED_POTION_DURATION = 10; // Duration in moves
 int current_hunger = MAX_HUNGER;
+int last_shot_dx = 0;
+int last_shot_dy = 0;
+bool last_shot_made = false;
 void generate_password(void);
 void throw_weapon(location start, int dx, int dy, int max_range, int damage, bool drops_after_hit);
 void remove_item_from_inventory(Item* item);
@@ -402,7 +405,7 @@ void pickup_weapon(char weapon_symbol, int x, int y) {
         return;
     }
 
-    // Find if weapon already exists in inventory
+    bool weapon_exists = false;
     for(int i = 0; i < player_inventory.count; i++) {
         if(player_inventory.items[i].symbol == weapon_symbol) {
             // For stackable weapons
@@ -413,56 +416,54 @@ void pickup_weapon(char weapon_symbol, int x, int y) {
                     player_inventory.items[i].count++;
                     map[y][x] = FLOOR;
                     mvprintw(40, 1, "Added %s to existing stack!", 
-                    player_inventory.items[i].name);
+                            player_inventory.items[i].name);
                     return;
                 }
             }
+            weapon_exists = true;
+            break;
         }
     }
 
-    // If not found or not stackable, add new weapon
-    Item* new_item = &player_inventory.items[player_inventory.count];
-    new_item->symbol = weapon_symbol;
-    new_item->isWeapon = true;
-    new_item->isEquipped = false;
-    new_item->count = 1;
-
-    switch(weapon_symbol) {
-        case SWORD_SYMBOL:
-            new_item->name = "SWORD";
-            new_item->damage = 10;
-            new_item->can_throw = false;
-            new_item->max_stack = 1;
-            sword_collected = true;
-            break;
-        case DAGGER_SYMBOL:
-            new_item->name = "DAGGER";
-            new_item->damage = 12;
-            new_item->can_throw = true;
-            new_item->throw_range = 5;
-            new_item->max_stack = 10;
-            break;
-        case MAGIC_WAND_SYMBOL:
-            new_item->name = "MAGIC WAND";
-            new_item->damage = 15;
-            new_item->can_throw = true;
-            new_item->throw_range = 10;
-            new_item->max_stack = 8;
-            break;
-        case ARROW_SYMBOL:
-            new_item->name = "ARROW";
-            new_item->damage = 5;
-            new_item->can_throw = true;
-            new_item->throw_range = 5;
-            new_item->max_stack = 20;
-            break;
-        default:
-            return;
+    if (!weapon_exists) {
+        // First time pickup - add with full stack
+        Item* new_item = &player_inventory.items[player_inventory.count];
+        new_item->symbol = weapon_symbol;
+        new_item->isWeapon = true;
+        new_item->isEquipped = false;
+        
+        switch(weapon_symbol) {
+            case SWORD_SYMBOL:
+                new_item->name = "SWORD";
+                new_item->damage = 10;
+                new_item->count = 1;
+                new_item->max_stack = 1;
+                break;
+            case DAGGER_SYMBOL:
+                new_item->name = "DAGGER";
+                new_item->damage = 12;
+                new_item->count = 10;  // Full stack for first pickup
+                new_item->max_stack = 10;
+                break;
+            case MAGIC_WAND_SYMBOL:
+                new_item->name = "MAGIC WAND";
+                new_item->damage = 15;
+                new_item->count = 8;   // Full stack for first pickup
+                new_item->max_stack = 8;
+                break;
+            case ARROW_SYMBOL:
+                new_item->name = "ARROW";
+                new_item->damage = 5;
+                new_item->count = 20;  // Full stack for first pickup
+                new_item->max_stack = 20;
+                break;
+        }
+        
+        player_inventory.count++;
     }
-
-    player_inventory.count++;
+    
     map[y][x] = FLOOR;
-    mvprintw(40, 1, "Picked up %s!", new_item->name);
+    mvprintw(40, 1, "Picked up weapon!");
 }
 
 void init_inventory() {
@@ -2144,20 +2145,31 @@ void throw_weapon(location start, int dx, int dy, int max_range, int damage, boo
     int current_x = start.x;
     int current_y = start.y;
     int distance = 0;
-    bool hit_enemy = false;
+    bool hit_something = false;
+    char weapon_symbol = '\0';
     
-    // Store the original map state
-    char original_map[MAP_HEIGHT][MAP_WIDTH];
-    memcpy(original_map, map, sizeof(map));
+    // Get the equipped weapon's symbol
+    for(int i = 0; i < player_inventory.count; i++) {
+        if(player_inventory.items[i].isEquipped && player_inventory.items[i].isWeapon) {
+            weapon_symbol = player_inventory.items[i].symbol;
+            player_inventory.items[i].count--;
+            break;
+        }
+    }
     
-    while (distance < max_range && !hit_enemy) {
+    while (distance < max_range && !hit_something) {
         int next_x = current_x + dx;
         int next_y = current_y + dy;
         distance++;
         
-        // Check if next position would be within map boundaries
+        // Check boundaries
         if (next_x <= 1 || next_x >= MAP_WIDTH - 2 || 
             next_y <= 1 || next_y >= MAP_HEIGHT - 2) {
+            // Drop weapon at current position
+            if (map[current_y][current_x] == FLOOR || map[current_y][current_x] == '#') {
+                map[current_y][current_x] = weapon_symbol;
+                mvprintw(40, 1, "Weapon dropped due to hitting boundary!");
+            }
             break;
         }
         
@@ -2165,53 +2177,39 @@ void throw_weapon(location start, int dx, int dy, int max_range, int damage, boo
         current_y = next_y;
         
         // Check for enemy hit
-        if (map[current_y][current_x] == ENEMY_DEMON ||
-            map[current_y][current_x] == ENEMY_FIRE ||
-            map[current_y][current_x] == ENEMY_GIANT ||
-            map[current_y][current_x] == ENEMY_SNAKE ||
-            map[current_y][current_x] == ENEMY_UNDEAD) {
-            
+        if (map[current_y][current_x] >= ENEMY_DEMON && 
+            map[current_y][current_x] <= ENEMY_UNDEAD) {
             damage_enemy(current_x, current_y, damage);
-            hit_enemy = true;
+            hit_something = true;
+            mvprintw(40, 1, "Weapon hit enemy!");
             break;
         }
         
-        // Check for walls or obstacles
+        // Check for walls/obstacles
         if (map[current_y][current_x] == VERTICAL || 
             map[current_y][current_x] == HORIZ || 
             map[current_y][current_x] == PILLAR ||
             map[current_y][current_x] == DOOR) {
+            // Drop weapon at previous position
+            if (map[current_y-dy][current_x-dx] == FLOOR || 
+                map[current_y-dy][current_x-dx] == '#') {
+                map[current_y-dy][current_x-dx] = weapon_symbol;
+                mvprintw(40, 1, "Weapon dropped after hitting obstacle!");
+            }
+            hit_something = true;
             break;
         }
-        
-        // Animation
-        memcpy(map, original_map, sizeof(map));
-        attron(COLOR_PAIR(2) | A_BOLD);
-        mvprintw(current_y, current_x, "*");
-        attroff(COLOR_PAIR(2) | A_BOLD);
-        refresh();
-        napms(50);
     }
     
-    // Restore original map state
-    memcpy(map, original_map, sizeof(map));
-    
-    // Drop the weapon if it didn't hit anything and is supposed to drop
-    if (!hit_enemy && drops_after_hit) {
+    // If reached max range without hitting anything
+    if (!hit_something && distance >= max_range) {
         if (map[current_y][current_x] == FLOOR || map[current_y][current_x] == '#') {
-            map[current_y][current_x] = DAGGER_SYMBOL;
+            map[current_y][current_x] = weapon_symbol;
+            mvprintw(40, 1, "Weapon dropped at maximum range!");
         }
     }
     
-    // Redraw everything
-    //draw_map();
     vision();
-    draw_borders();
-    
-    // Ensure player is still visible
-    attron(COLOR_PAIR(2) | A_BOLD);
-    mvprintw(player.y, player.x, "@");
-    attroff(COLOR_PAIR(2) | A_BOLD);
     refresh();
 }
 
@@ -2632,43 +2630,86 @@ if (speed_active) {
 break;
 }
 
-                case 'f': // Fight/Attack
-    {
-        mvprintw(40, 1, "Attack direction? (Use arrow keys)");
-        refresh();
-        int attack_dir = getch();
-        if(attack_dir == KEY_UP || attack_dir == KEY_DOWN || 
-           attack_dir == KEY_LEFT || attack_dir == KEY_RIGHT) {
-            handle_attack(attack_dir);
+     case ' ': // Space bar
+{
+    // Find equipped weapon
+    Item* equipped_weapon = NULL;
+    for(int i = 0; i < player_inventory.count; i++) {
+        if(player_inventory.items[i].isEquipped && player_inventory.items[i].isWeapon) {
+            equipped_weapon = &player_inventory.items[i];
+            break;
         }
     }
-    break;
+    
+    if(!equipped_weapon) {
+        mvprintw(40, 1, "No weapon equipped!");
+        break;
+    }
 
-case 't': // Throw weapon
-    {
-        // Find equipped throwable weapon
-        bool has_throwable = false;
+    if(equipped_weapon->count <= 0) {
+        mvprintw(40, 1, "Out of ammo!");
+        break;
+    }
+
+    // For melee weapons (sword and mace)
+    if(equipped_weapon->symbol == 'M' || equipped_weapon->symbol == 'I') {
+        attack_with_weapon((location){player.x, player.y}, 
+                         equipped_weapon->symbol, 0, 0);
+        last_shot_made = true;
+    } else {
+        // For ranged weapons
+        mvprintw(40, 1, "Choose direction (arrow keys)");
+        refresh();
+        int dir = getch();
+        int dx = 0, dy = 0;
+        
+        switch(dir) {
+            case KEY_UP:    dy = -1; break;
+            case KEY_DOWN:  dy = 1;  break;
+            case KEY_LEFT:  dx = -1; break;
+            case KEY_RIGHT: dx = 1;  break;
+            default: 
+                mvprintw(40, 1, "Invalid direction!");
+                break;
+        }
+        
+        if(dx != 0 || dy != 0) {
+            last_shot_dx = dx;
+            last_shot_dy = dy;
+            last_shot_made = true;
+            throw_weapon((location){player.x, player.y}, dx, dy, 
+                        equipped_weapon->throw_range, 
+                        equipped_weapon->damage, true);
+        }
+    }
+}
+break;
+
+case 'a': // Repeat last shot
+    if(last_shot_made) {
+        Item* equipped_weapon = NULL;
         for(int i = 0; i < player_inventory.count; i++) {
-            if(player_inventory.items[i].isEquipped && 
-               player_inventory.items[i].can_throw) {
-                has_throwable = true;
+            if(player_inventory.items[i].isEquipped && player_inventory.items[i].isWeapon) {
+                equipped_weapon = &player_inventory.items[i];
                 break;
             }
         }
         
-        if(has_throwable) {
-            mvprintw(40, 1, "Throw direction? (Use arrow keys)");
-            refresh();
-            int throw_dir = getch();
-            if(throw_dir == KEY_UP || throw_dir == KEY_DOWN || 
-               throw_dir == KEY_LEFT || throw_dir == KEY_RIGHT) {
-                handle_attack(throw_dir);
-            }
+        if(!equipped_weapon || equipped_weapon->count <= 0) {
+            mvprintw(40, 1, "Cannot repeat shot - no ammo!");
+            break;
+        }
+        
+        if(equipped_weapon->symbol == 'M' || equipped_weapon->symbol == 'I') {
+            attack_with_weapon((location){player.x, player.y}, 
+                             equipped_weapon->symbol, 0, 0);
         } else {
-            mvprintw(40, 1, "No throwable weapon equipped!");
+            throw_weapon((location){player.x, player.y}, last_shot_dx, last_shot_dy,
+                        equipped_weapon->throw_range, 
+                        equipped_weapon->damage, true);
         }
     }
-    break;
+break;
 
     
 

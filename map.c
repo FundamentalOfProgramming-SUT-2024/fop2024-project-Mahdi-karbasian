@@ -60,11 +60,17 @@
 #define SPAWN_RATE_HIGH      0.85f  // 85% chance per room
 #define SPAWN_RATE_VERY_HIGH 1.0f   // 100% chance per room
 
+#define MAX_HUNGER 100
+#define HUNGER_DECREASE_RATE 1    // How much hunger decreases per move
+#define HUNGER_HEALTH_REGEN 2     // Health regenerated when full
+#define HUNGER_HEALTH_DAMAGE 5    // Damage taken when starving
+#define FOOD_HUNGER_RESTORE 30    // How much hunger is restored by eating food
 #define MAX_ENEMIES_VERY_LOW  1     // Max enemies per room
 #define MAX_ENEMIES_LOW       2
 #define MAX_ENEMIES_NORMAL    3     // Original value
 #define MAX_ENEMIES_HIGH      4
 #define MAX_ENEMIES_VERY_HIGH 5
+#define MAX(a,b) ((a) > (b) ? (a) : (b))
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 
 // Global spawn rate controls
@@ -190,6 +196,7 @@ bool door_unlocked = false;
 bool visited_tiles[MAP_HEIGHT][MAP_WIDTH] = {false};
 int speed_potion_moves = 0;
 const int SPEED_POTION_DURATION = 10; // Duration in moves
+int current_hunger = MAX_HUNGER;
 void generate_password(void);
 void throw_weapon(location start, int dx, int dy, int max_range, int damage, bool drops_after_hit);
 void remove_item_from_inventory(Item* item);
@@ -992,25 +999,18 @@ void use_item(int index) {
         use_potion(item);
         mvprintw(40, 1, "Used %s!", item->name);
     }
-    else if (item->symbol == FOOD) {
-        if (player_health < MAX_HEALTH) {
-            int heal_amount = item->heal_value;
-            if (player_health + heal_amount > MAX_HEALTH) {
-                heal_amount = MAX_HEALTH - player_health;
-            }
-            player_health += heal_amount;
-            mvprintw(40, 1, "Used Food Ration: Restored %d health!", heal_amount);
-            
-            // Remove food item from inventory
-            for (int i = index; i < player_inventory.count - 1; i++) {
-                player_inventory.items[i] = player_inventory.items[i + 1];
-            }
-            player_inventory.count--;
-        } else {
-            mvprintw(40, 1, "Already at full health!");
+    if (item->symbol == FOOD) {
+        current_hunger = MIN(current_hunger + FOOD_HUNGER_RESTORE, MAX_HUNGER);
+        mvprintw(40, 1, "Ate food! Hunger restored by %d points.", FOOD_HUNGER_RESTORE);
+        
+        // Remove food item from inventory
+        for (int i = index; i < player_inventory.count - 1; i++) {
+            player_inventory.items[i] = player_inventory.items[i + 1];
         }
+        player_inventory.count--;
     }
-}
+    }
+
 
 void place_weapons(Room* rooms, int room_count) {
     const float WEAPON_CHANCE = 0.35f;  // 35% chance for a room to have a weapon
@@ -1973,7 +1973,15 @@ int get_current_room_type(location player) {
 void update_status_line(int score, int level, int player_health, location player, time_t start_time) {
     int room_type = get_current_room_type(player);
     const char* room_name;
-    attron(COLOR_PAIR(1)); 
+    const char* hunger_status;
+    
+    // Get hunger status description
+    if (current_hunger >= 90) hunger_status = "Well Fed";
+    else if (current_hunger >= 70) hunger_status = "Satisfied";
+    else if (current_hunger >= 40) hunger_status = "Hungry";
+    else if (current_hunger >= 20) hunger_status = "Very Hungry";
+    else if (current_hunger > 0) hunger_status = "Starving";
+    else hunger_status = "STARVING!";
 
     switch(room_type) {
         case 1:
@@ -1994,10 +2002,11 @@ void update_status_line(int score, int level, int player_health, location player
     int minutes = elapsed_time / 60;
     int seconds = elapsed_time % 60;
 
-    mvprintw(41, 1, "Score: %d | Level: %d | Health: %d | Room: %s | Time: %02d:%02d | User: %s", 
-             score, level, player_health, room_name, minutes, seconds, "mahdi200584");
-    
-    attroff(COLOR_PAIR(3));
+    attron(COLOR_PAIR(1)); 
+    mvprintw(41, 1, "Score: %d | Level: %d | Health: %d | Hunger: %d%% (%s) | Room: %s | Time: %02d:%02d | User: %s", 
+             score, level, player_health, current_hunger, hunger_status, room_name, 
+             minutes, seconds, "mahdi866");
+    attroff(COLOR_PAIR(1));
 }
 
 void attack_with_weapon(location player, char weapon_type, int direction_x, int direction_y) {
@@ -2370,7 +2379,23 @@ int main() {
                         pickup_potion(map[new_y][new_x], new_x, new_y);
                 }   
 
-                
+                // Add this after player movement
+                if (ch == KEY_UP || ch == KEY_DOWN || ch == KEY_LEFT || ch == KEY_RIGHT) {
+                 // Decrease hunger with each move
+                    current_hunger = MAX(0, current_hunger - HUNGER_DECREASE_RATE);
+    
+                // Handle hunger effects
+                if (current_hunger >= 90) {  // When well fed
+                if (player_health < MAX_HEALTH) {
+                player_health = MIN(player_health + HUNGER_HEALTH_REGEN, MAX_HEALTH);
+                mvprintw(38, 1, "You feel well fed. Health regenerated!");
+        }
+    } 
+    else if (current_hunger <= 0) {  // When starving
+        player_health -= HUNGER_HEALTH_DAMAGE;
+        mvprintw(38, 1, "You are starving! Lost %d health!", HUNGER_HEALTH_DAMAGE);
+    }
+}
 
                         // Update player position
                         player.x = new_x;

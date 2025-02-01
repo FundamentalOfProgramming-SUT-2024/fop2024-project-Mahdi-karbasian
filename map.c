@@ -22,6 +22,7 @@
 #define TRAP_DAMAGE 10     // Damage dealt by traps
 #define MAX_HEALTH 1000     // Maximum player health
 #define FOOD '8'
+#define MACE_SYMBOL 'M'
 #define SWORD_SYMBOL 'I'
 #define DAGGER_SYMBOL 'd'
 #define MAGIC_WAND_SYMBOL '%'
@@ -96,6 +97,13 @@ typedef struct {
 
 EnemyList current_enemies;
 
+typedef enum {
+    CAT_WEAPON = 0,
+    CAT_POTION = 1,
+    CAT_FOOD = 2,
+    CAT_KEY = 3
+} ItemCategory;
+
 typedef struct {
     char symbol;
     char* name;
@@ -107,13 +115,14 @@ typedef struct {
     int max_stack;     // Maximum number that can be carried
     bool can_throw;    // Whether weapon can be thrown
     int throw_range;   // Maximum throwing range
-    bool isKey;        // New: whether item is a key
-    bool isBroken;     // New: whether key is broken
+    bool isKey;        // Whether item is a key
+    bool isBroken;     // Whether key is broken
     bool isPotion;
     int potion_moves_left;  // For tracking duration
     int speed_bonus;        // For speed potion
     int damage_multiplier;  // For damage potion
     int heal_rate;         // For health potion
+    ItemCategory category; // Add explicit category field
 } Item;
 
 typedef struct {
@@ -152,6 +161,7 @@ typedef struct {
 } Level;
 
 Level current_level;
+
 
 
 
@@ -200,6 +210,10 @@ int current_hunger = MAX_HUNGER;
 int last_shot_dx = 0;
 int last_shot_dy = 0;
 bool last_shot_made = false;
+bool damage_boost = false;
+int damage_boost_turns = 0;
+bool speed_boost = false;
+int speed_boost_turns = 0;
 void generate_password(void);
 void throw_weapon(location start, int dx, int dy, int max_range, int damage, bool drops_after_hit);
 void remove_item_from_inventory(Item* item);
@@ -370,6 +384,20 @@ void init_starting_weapon() {
 bool sword_collected = false;
 bool sword_placed = false;
 
+void sort_inventory() {
+    // Simple bubble sort based on category
+    for (int i = 0; i < player_inventory.count - 1; i++) {
+        for (int j = 0; j < player_inventory.count - i - 1; j++) {
+            if (player_inventory.items[j].category > player_inventory.items[j + 1].category) {
+                // Swap items
+                Item temp = player_inventory.items[j];
+                player_inventory.items[j] = player_inventory.items[j + 1];
+                player_inventory.items[j + 1] = temp;
+            }
+        }
+    }
+}
+
 bool can_pickup_weapon(char weapon_symbol) {
     if (player_inventory.count >= MAX_INVENTORY) {
         return false;
@@ -399,71 +427,170 @@ bool is_point_in_room(int x, int y, Room room) {
             y >= room.y && y <= room.y + room.height);
 }
 
-void pickup_weapon(char weapon_symbol, int x, int y) {
-    if (!can_pickup_weapon(weapon_symbol)) {
-        mvprintw(40, 1, "Cannot pick up more of this weapon type!");
+void pickup_food(int x, int y) {
+    if (player_inventory.count >= MAX_INVENTORY) {
+        mvprintw(40, 1, "Inventory full! Cannot pick up food!");
         return;
     }
 
-    bool weapon_exists = false;
-    for(int i = 0; i < player_inventory.count; i++) {
-        if(player_inventory.items[i].symbol == weapon_symbol) {
-            // For stackable weapons
-            if(weapon_symbol == DAGGER_SYMBOL || 
-               weapon_symbol == MAGIC_WAND_SYMBOL || 
-               weapon_symbol == ARROW_SYMBOL) {
-                if(player_inventory.items[i].count < player_inventory.items[i].max_stack) {
-                    player_inventory.items[i].count++;
-                    map[y][x] = FLOOR;
-                    mvprintw(40, 1, "Added %s to existing stack!", 
-                            player_inventory.items[i].name);
-                    return;
-                }
-            }
-            weapon_exists = true;
+    Item* new_item = &player_inventory.items[player_inventory.count];
+    new_item->symbol = FOOD;
+    new_item->name = "Food Ration";
+    new_item->isWeapon = false;
+    new_item->isPotion = false;
+    new_item->isKey = false;
+    new_item->category = CAT_FOOD;  // Explicitly set food category
+    new_item->heal_value = FOOD_HUNGER_RESTORE;
+    new_item->isEquipped = false;
+    new_item->count = 1;
+    
+    player_inventory.count++;
+    map[y][x] = FLOOR;
+    
+    sort_inventory();
+    mvprintw(40, 1, "Picked up Food!");
+}
+
+void pickup_potion(char potion_type, int x, int y) {
+    if (player_inventory.count >= MAX_INVENTORY) {
+        mvprintw(40, 1, "Inventory full! Cannot pick up potion!");
+        return;
+    }
+
+    Item* new_item = &player_inventory.items[player_inventory.count];
+    new_item->symbol = potion_type;
+    new_item->isPotion = true;
+    new_item->isWeapon = false;
+    new_item->isKey = false;
+    new_item->category = CAT_POTION;  // Set proper category
+    new_item->isEquipped = false;
+    new_item->potion_moves_left = 0;
+    
+    switch(potion_type) {
+        case POTION_HEALTH:
+            new_item->name = "Health Potion";
+            new_item->heal_value = 50;  // Or whatever value you use for health potions
             break;
+        case POTION_DAMAGE:
+            new_item->name = "Damage Potion";
+            new_item->potion_moves_left = 10;  // Duration for damage boost
+            break;
+        case POTION_SPEED:
+            new_item->name = "Speed Potion";
+            new_item->potion_moves_left = 20;  // Duration for speed boost
+            break;
+        default:
+            new_item->name = "Unknown Potion";
+            break;
+    }
+    
+    player_inventory.count++;
+    map[y][x] = FLOOR;
+    
+    sort_inventory();  // Sort after adding
+    mvprintw(40, 1, "Picked up %s!", new_item->name);
+}
+
+void pickup_weapon(char weapon_symbol, int x, int y) {
+    if (player_inventory.count >= MAX_INVENTORY) {
+        mvprintw(40, 1, "Inventory full! Cannot pick up weapon!");
+        return;
+    }
+
+    // First check if we already have this type of weapon that isn't at max stack
+    for (int i = 0; i < player_inventory.count; i++) {
+        if (player_inventory.items[i].symbol == weapon_symbol &&
+            player_inventory.items[i].count < player_inventory.items[i].max_stack) {
+            
+            // Found an existing stack that isn't full
+            player_inventory.items[i].count++;
+            map[y][x] = FLOOR;
+            
+            mvprintw(40, 1, "Added %s to stack (%d/%d)!", 
+                    player_inventory.items[i].name,
+                    player_inventory.items[i].count,
+                    player_inventory.items[i].max_stack);
+            return;
         }
     }
 
-    if (!weapon_exists) {
-        // First time pickup - add with full stack
-        Item* new_item = &player_inventory.items[player_inventory.count];
-        new_item->symbol = weapon_symbol;
-        new_item->isWeapon = true;
-        new_item->isEquipped = false;
-        
-        switch(weapon_symbol) {
-            case SWORD_SYMBOL:
-                new_item->name = "SWORD";
-                new_item->damage = 10;
-                new_item->count = 1;
-                new_item->max_stack = 1;
-                break;
-            case DAGGER_SYMBOL:
-                new_item->name = "DAGGER";
-                new_item->damage = 12;
-                new_item->count = 10;  // Full stack for first pickup
-                new_item->max_stack = 10;
-                break;
-            case MAGIC_WAND_SYMBOL:
-                new_item->name = "MAGIC WAND";
-                new_item->damage = 15;
-                new_item->count = 8;   // Full stack for first pickup
-                new_item->max_stack = 8;
-                break;
-            case ARROW_SYMBOL:
-                new_item->name = "ARROW";
-                new_item->damage = 5;
-                new_item->count = 20;  // Full stack for first pickup
-                new_item->max_stack = 20;
-                break;
-        }
-        
-        player_inventory.count++;
+    // If we get here, either we don't have this weapon or all stacks are full
+    Item* new_item = &player_inventory.items[player_inventory.count];
+    new_item->symbol = weapon_symbol;
+    new_item->isWeapon = true;
+    new_item->isPotion = false;
+    new_item->isKey = false;
+    new_item->category = CAT_WEAPON;  // Set proper category
+    new_item->isEquipped = false;
+    new_item->count = 1;  // Start with 1 for new stack
+    
+    switch(weapon_symbol) {
+        case SWORD_SYMBOL:
+            new_item->name = "Sword";
+            new_item->damage = 15;
+            new_item->count = 1;
+            new_item->max_stack = 1;
+            new_item->throw_range = 0;  // Melee weapon
+            new_item->can_throw = false;
+            break;
+            
+        case DAGGER_SYMBOL:
+            new_item->name = "Dagger";
+            new_item->damage = 8;
+            new_item->count = 1;
+            new_item->max_stack = 10;
+            new_item->throw_range = 5;
+            new_item->can_throw = true;
+            break;
+            
+        case MAGIC_WAND_SYMBOL:
+            new_item->name = "Magic Wand";
+            new_item->damage = 12;
+            new_item->count = 1;
+            new_item->max_stack = 8;
+            new_item->throw_range = 8;
+            new_item->can_throw = true;
+            break;
+            
+        case ARROW_SYMBOL:
+            new_item->name = "Arrow";
+            new_item->damage = 5;
+            new_item->count = 1;
+            new_item->max_stack = 20;
+            new_item->throw_range = 6;
+            new_item->can_throw = true;
+            break;
+            
+        case MACE_SYMBOL:
+            new_item->name = "Mace";
+            new_item->damage = 18;
+            new_item->count = 1;
+            new_item->max_stack = 1;
+            new_item->throw_range = 0;  // Melee weapon
+            new_item->can_throw = false;
+            break;
+            
+        default:
+            new_item->name = "Unknown Weapon";
+            new_item->damage = 1;
+            new_item->count = 1;
+            new_item->max_stack = 1;
+            new_item->throw_range = 0;
+            new_item->can_throw = false;
+            break;
     }
     
+    player_inventory.count++;
     map[y][x] = FLOOR;
-    mvprintw(40, 1, "Picked up weapon!");
+    
+    sort_inventory();  // Sort after adding
+    
+    // Different messages for stackable vs non-stackable weapons
+    if (new_item->max_stack > 1) {
+        mvprintw(40, 1, "Picked up %s (1/%d)!", new_item->name, new_item->max_stack);
+    } else {
+        mvprintw(40, 1, "Picked up %s!", new_item->name);
+    }
 }
 
 void init_inventory() {
@@ -475,75 +602,113 @@ void init_inventory() {
         player_inventory.items[i].damage = 0;
         player_inventory.items[i].isEquipped = false;
         player_inventory.items[i].isWeapon = false;
-    }
-
-    // Add starting mace
-    if (player_inventory.count < MAX_INVENTORY) {
-        Item* mace_item = &player_inventory.items[player_inventory.count];
-        mace_item->symbol = 'M';
-        mace_item->name = "MACE";
-        mace_item->damage = 5;
-        mace_item->isEquipped = true;
-        mace_item->isWeapon = true;
-        mace_item->heal_value = 0;
-        player_inventory.count++;
+        player_inventory.items[i].isPotion = false;
+        player_inventory.items[i].isKey = false;
+        player_inventory.items[i].category = CAT_WEAPON; // Default category
+        player_inventory.items[i].count = 0;
+        player_inventory.items[i].max_stack = 1;
     }
 }
 
 void display_inventory() {
-    clear();
-    mvprintw(1, 1, "=== INVENTORY ===");
-    mvprintw(2, 1, "Items: %d/%d", player_inventory.count, MAX_INVENTORY);
-    mvprintw(3, 1, "Current Health: %d/%d", player_health, MAX_HEALTH);
+    // First, clear the entire inventory area
+    for (int y = 2; y < MAP_HEIGHT; y++) {
+        for (int x = MAP_WIDTH + 2; x < MAP_WIDTH + 40; x++) {  // Increased width to 40 for longer messages
+            mvprintw(y, x, " ");
+        }
+    }
     
-    int row = 5;
+    // Get current UTC time
+    time_t now;
+    struct tm *tm_info;
+    char time_str[30];
     
-    // First display weapons
-    mvprintw(row++, 1, "WEAPONS:");
+    time(&now);
+    tm_info = gmtime(&now);
+    strftime(time_str, 30, "%Y-%m-%d %H:%M:%S", tm_info);
+    
+    // Display header with time and user info
+    mvprintw(2, MAP_WIDTH + 2, "UTC: %s", time_str);
+    mvprintw(3, MAP_WIDTH + 2, "User: %s", "mahdi866");
+    mvprintw(4, MAP_WIDTH + 2, "Inventory:");
+    int line = 6;  // Start content after header
+    
+    // Display weapons
+    mvprintw(line++, MAP_WIDTH + 2, "Weapons:");
     for (int i = 0; i < player_inventory.count; i++) {
-        if (player_inventory.items[i].isWeapon) {
-            mvprintw(row, 1, "%d. %c %s (Damage: %d)%s", 
-                     i + 1,
-                     player_inventory.items[i].symbol,
-                     player_inventory.items[i].name,
-                     player_inventory.items[i].damage,
-                     player_inventory.items[i].isEquipped ? " [EQUIPPED]" : "");
-            
-            if (player_inventory.items[i].count > 1) {
-                mvprintw(row, 50, " [%d/%d]", 
-                        player_inventory.items[i].count, 
-                        player_inventory.items[i].max_stack);
+        if (player_inventory.items[i].category == CAT_WEAPON) {
+            if (player_inventory.items[i].max_stack > 1) {
+                // Display stackable weapons with count
+                mvprintw(line++, MAP_WIDTH + 4, "%d) %c - %s (%d/%d) %s", 
+                    i + 1,
+                    player_inventory.items[i].symbol,
+                    player_inventory.items[i].name,
+                    player_inventory.items[i].count,
+                    player_inventory.items[i].max_stack,
+                    player_inventory.items[i].isEquipped ? "(Equipped)" : "");
+            } else {
+                // Display non-stackable weapons
+                mvprintw(line++, MAP_WIDTH + 4, "%d) %c - %s %s", 
+                    i + 1,
+                    player_inventory.items[i].symbol,
+                    player_inventory.items[i].name,
+                    player_inventory.items[i].isEquipped ? "(Equipped)" : "");
             }
-            row++;
         }
     }
     
-    row += 2;
-    mvprintw(row++, 1, "FOOD:");
+    // Display potions
+    line++;
+    mvprintw(line++, MAP_WIDTH + 2, "Potions:");
     for (int i = 0; i < player_inventory.count; i++) {
-        if (!player_inventory.items[i].isWeapon && !player_inventory.items[i].isPotion) {
-            mvprintw(row++, 1, "%d. %c %s (Heals: %d)", 
-                     i + 1,
-                     player_inventory.items[i].symbol,
-                     player_inventory.items[i].name,
-                     player_inventory.items[i].heal_value);
+        if (player_inventory.items[i].category == CAT_POTION) {
+            mvprintw(line++, MAP_WIDTH + 4, "%d) %c - %s", 
+                    i + 1,
+                    player_inventory.items[i].symbol,
+                    player_inventory.items[i].name);
+        }
+    }
+    
+    // Display food
+    line++;
+    mvprintw(line++, MAP_WIDTH + 2, "Food:");
+    for (int i = 0; i < player_inventory.count; i++) {
+        if (player_inventory.items[i].category == CAT_FOOD) {
+            mvprintw(line++, MAP_WIDTH + 4, "%d) %c - %s", 
+                    i + 1,
+                    player_inventory.items[i].symbol,
+                    player_inventory.items[i].name);
+        }
+    }
+    
+    // Display keys
+    line++;
+    mvprintw(line++, MAP_WIDTH + 2, "Keys:");
+    for (int i = 0; i < player_inventory.count; i++) {
+        if (player_inventory.items[i].category == CAT_KEY) {
+            mvprintw(line++, MAP_WIDTH + 4, "%d) %c - %s", 
+                    i + 1,
+                    player_inventory.items[i].symbol,
+                    player_inventory.items[i].name);
         }
     }
 
-    row += 2;
-    mvprintw(row++, 1, "POTIONS:");
-    for (int i = 0; i < player_inventory.count; i++) {
-        if (player_inventory.items[i].isPotion) {
-            mvprintw(row++, 1, "%d. %c %s", 
-                     i + 1,
-                     player_inventory.items[i].symbol,
-                     player_inventory.items[i].name);
-        }
-    }
+    // Add divider
+    line++;
+    mvprintw(line++, MAP_WIDTH + 2, "------------------------");
 
-    mvprintw(row + 2, 1, "Press 1-9 to use items or equip weapons");
-    mvprintw(row + 3, 1, "Press 't' to throw equipped weapon");
-    mvprintw(row + 4, 1, "Press 'i' to close inventory");
+    // Display controls
+    mvprintw(line++, MAP_WIDTH + 2, "Controls:");
+    mvprintw(line++, MAP_WIDTH + 4, "1-9: Use/Equip item");
+    mvprintw(line++, MAP_WIDTH + 4, "d: Drop item");
+    mvprintw(line++, MAP_WIDTH + 4, "c: Combine broken keys");
+    mvprintw(line++, MAP_WIDTH + 4, "i: Close inventory");
+    
+    // Add status info at bottom
+    line++;
+    mvprintw(line++, MAP_WIDTH + 2, "------------------------");
+    mvprintw(line++, MAP_WIDTH + 2, "Press any key to continue...");
+    
     refresh();
 }
 
@@ -639,39 +804,6 @@ void place_potions(Room* rooms, int room_count) {
             attempts++;
         }
     }
-}
-
-void pickup_potion(char potion_type, int x, int y) {
-    if (player_inventory.count >= MAX_INVENTORY) {
-        mvprintw(40, 1, "Inventory full! Cannot pick up potion!");
-        return;
-    }
-
-    Item* new_potion = &player_inventory.items[player_inventory.count];
-    new_potion->symbol = potion_type;
-    new_potion->isPotion = true;
-    new_potion->potion_moves_left = 0;
-    new_potion->isEquipped = false;
-    new_potion->isWeapon = false;  // Make sure it's not marked as a weapon
-
-    switch(potion_type) {
-        case POTION_HEALTH:
-            new_potion->name = "Health Potion";
-            new_potion->heal_rate = 2;
-            break;
-        case POTION_SPEED:
-            new_potion->name = "Speed Potion";
-            new_potion->speed_bonus = 2;
-            break;
-        case POTION_DAMAGE:
-            new_potion->name = "Damage Potion";
-            new_potion->damage_multiplier = 2;
-            break;
-    }
-
-    player_inventory.count++;
-    map[y][x] = FLOOR;
-    mvprintw(40, 1, "Picked up %s!", new_potion->name);
 }
 
 void use_potion(Item* potion) {
@@ -914,11 +1046,6 @@ void drop_item() {
     int item;
     bool valid_input = false;
     
-    // Debug information at start
-    mvprintw(38, 1, "Player position: x=%d, y=%d", player.x, player.y);
-    mvprintw(39, 1, "Current tile at player position: '%c'", map[player.y][player.x]);
-    mvprintw(40, 1, "Inventory count: %d", player_inventory.count);
-    
     if (player_inventory.count == 0) {
         mvprintw(41, 1, "No items to drop!");
         refresh();
@@ -938,37 +1065,42 @@ void drop_item() {
         }
         
         if (input >= '1' && input <= '9') {
-            item = input - '1'; // Convert to 0-based index
-            
-            // Debug information for selected item
-            mvprintw(43, 1, "Selected item index: %d", item);
-            refresh();
+            item = input - '1';
             
             if (item < player_inventory.count) {
                 valid_input = true;
                 
-                // More debug info
-                mvprintw(44, 1, "Selected item: %s (symbol: %c)", 
-                    player_inventory.items[item].name,
-                    player_inventory.items[item].symbol);
-                refresh();
-                
-                // Check if the floor tile is empty
                 if (map[player.y][player.x] != FLOOR) {
-                    mvprintw(45, 1, "Cannot drop item here! Current tile: '%c'", map[player.y][player.x]);
+                    mvprintw(45, 1, "Cannot drop item here!");
                     refresh();
                     return;
                 }
                 
-                // Drop the item
-                map[player.y][player.x] = player_inventory.items[item].symbol;
-                mvprintw(45, 1, "Dropped item %s!", player_inventory.items[item].name);
+                Item* dropping = &player_inventory.items[item];
                 
-                // Remove item from inventory
-                for (int i = item; i < player_inventory.count - 1; i++) {
-                    player_inventory.items[i] = player_inventory.items[i + 1];
+                // For stackable items
+                if (dropping->max_stack > 1) {
+                    dropping->count--;
+                    map[player.y][player.x] = dropping->symbol;
+                    mvprintw(45, 1, "Dropped one %s (%d/%d remaining)", 
+                            dropping->name, dropping->count, dropping->max_stack);
+                    
+                    // Remove item if last one dropped
+                    if (dropping->count <= 0) {
+                        for (int i = item; i < player_inventory.count - 1; i++) {
+                            player_inventory.items[i] = player_inventory.items[i + 1];
+                        }
+                        player_inventory.count--;
+                    }
+                } else {
+                    // Non-stackable items
+                    map[player.y][player.x] = dropping->symbol;
+                    for (int i = item; i < player_inventory.count - 1; i++) {
+                        player_inventory.items[i] = player_inventory.items[i + 1];
+                    }
+                    player_inventory.count--;
+                    mvprintw(45, 1, "Dropped %s!", dropping->name);
                 }
-                player_inventory.count--;
                 
                 refresh();
                 return;
@@ -985,33 +1117,91 @@ void use_item(int index) {
     
     Item* item = &player_inventory.items[index];
     
-    if (item->isWeapon) {
-        // Unequip currently equipped weapon
-        for (int i = 0; i < player_inventory.count; i++) {
-            if (player_inventory.items[i].isWeapon) {
-                player_inventory.items[i].isEquipped = false;
-            }
-        }
-        // Equip the selected weapon
-        item->isEquipped = true;
-        mvprintw(40, 1, "Equipped %s!", item->name);
-    } 
-    else if (item->isPotion) {
-        use_potion(item);
-        mvprintw(40, 1, "Used %s!", item->name);
-    }
-    if (item->symbol == FOOD) {
+    if (item->category == CAT_FOOD) {
+        // Handle food consumption
         current_hunger = MIN(current_hunger + FOOD_HUNGER_RESTORE, MAX_HUNGER);
         mvprintw(40, 1, "Ate food! Hunger restored by %d points.", FOOD_HUNGER_RESTORE);
         
-        // Remove food item from inventory
+        // Remove the food item and shift remaining items
         for (int i = index; i < player_inventory.count - 1; i++) {
             player_inventory.items[i] = player_inventory.items[i + 1];
         }
         player_inventory.count--;
+        
+        // Resort inventory after removal
+        sort_inventory();
+    } 
+    else if (item->isPotion) {
+        if (item->symbol == POTION_HEALTH) {
+            player_health = MIN(player_health + item->heal_value, MAX_HEALTH);
+            mvprintw(40, 1, "Used Health Potion! Health restored by %d points.", item->heal_value);
+        }
+        else if (item->symbol == POTION_DAMAGE) {
+            damage_active = true;
+            damage_boost_turns = item->potion_moves_left;
+            mvprintw(40, 1, "Used Damage Potion! Damage boosted for %d turns.", item->potion_moves_left);
+        }
+        else if (item->symbol == POTION_SPEED) {
+            speed_boost = true;
+            speed_boost_turns = item->potion_moves_left;
+            mvprintw(40, 1, "Used Speed Potion! Speed boosted for %d turns.", item->potion_moves_left);
+        }
+        
+        // Remove the potion and shift remaining items
+        for (int i = index; i < player_inventory.count - 1; i++) {
+            player_inventory.items[i] = player_inventory.items[i + 1];
+        }
+        player_inventory.count--;
+        
+        // Resort inventory after removal
+        sort_inventory();
     }
+    else if (item->isWeapon) {
+        // Handle weapon equipping/unequipping
+        if (item->isEquipped) {
+            item->isEquipped = false;
+            mvprintw(40, 1, "Unequipped %s.", item->name);
+        } else {
+            // Unequip any currently equipped weapon first
+            for (int i = 0; i < player_inventory.count; i++) {
+                if (player_inventory.items[i].isWeapon && 
+                    player_inventory.items[i].isEquipped) {
+                    player_inventory.items[i].isEquipped = false;
+                }
+            }
+            item->isEquipped = true;
+            mvprintw(40, 1, "Equipped %s.", item->name);
+        }
     }
-
+    else if (item->isKey) {
+        // Check if player is next to a door
+        bool door_nearby = false;
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                if (map[player.y + dy][player.x + dx] == DOOR) {
+                    door_nearby = true;
+                    map[player.y + dy][player.x + dx] = FLOOR;
+                    mvprintw(40, 1, "Used key to open door!");
+                    
+                    // Remove the key and shift remaining items
+                    for (int i = index; i < player_inventory.count - 1; i++) {
+                        player_inventory.items[i] = player_inventory.items[i + 1];
+                    }
+                    player_inventory.count--;
+                    
+                    // Resort inventory after removal
+                    sort_inventory();
+                    return;
+                }
+            }
+        }
+        
+        if (!door_nearby) {
+            mvprintw(40, 1, "No door nearby to use the key on!");
+        }
+    }
+    refresh();
+}
 
 void place_weapons(Room* rooms, int room_count) {
     const float WEAPON_CHANCE = 0.35f;  // 35% chance for a room to have a weapon
@@ -1478,8 +1668,8 @@ void place_gold(Room* rooms, int room_count) {
 }
 
 void place_food(Room* rooms, int room_count) {
-    const float ROOM_CHANCE = 0.7f;  // 70% chance for a room to have food
-    const int GOLD_PER_ROOM = 2;     // Number of food
+    const float ROOM_CHANCE = 0.9f;  // 70% chance for a room to have food
+    const int GOLD_PER_ROOM = 4;     // Number of food
     
     for (int r = 0; r < room_count; r++) {
         if ((rand() % 100) > (ROOM_CHANCE * 100)) {
@@ -1514,7 +1704,7 @@ void place_food(Room* rooms, int room_count) {
                 
                 if (is_suitable) {
                     int gold_type = rand() % 100;
-                    if (gold_type < 60) {          
+                    if (gold_type < 90) {          
                         map[y][x] = FOOD;
                     }
                     food_placed++;
@@ -2146,16 +2336,27 @@ void throw_weapon(location start, int dx, int dy, int max_range, int damage, boo
     int current_y = start.y;
     int distance = 0;
     bool hit_something = false;
-    char weapon_symbol = '\0';
     
-    // Get the equipped weapon's symbol
+    // Get the equipped weapon
+    Item* equipped_weapon = NULL;
     for(int i = 0; i < player_inventory.count; i++) {
         if(player_inventory.items[i].isEquipped && player_inventory.items[i].isWeapon) {
-            weapon_symbol = player_inventory.items[i].symbol;
-            player_inventory.items[i].count--;
+            equipped_weapon = &player_inventory.items[i];
             break;
         }
     }
+    
+    if (!equipped_weapon || equipped_weapon->count <= 0) {
+        mvprintw(40, 1, "No weapon equipped or out of ammo!");
+        return;
+    }
+    
+    char weapon_symbol = equipped_weapon->symbol;
+    
+    // Clear previous messages
+    move(38, 1); clrtoeol();
+    move(39, 1); clrtoeol();
+    move(40, 1); clrtoeol();
     
     while (distance < max_range && !hit_something) {
         int next_x = current_x + dx;
@@ -2165,11 +2366,17 @@ void throw_weapon(location start, int dx, int dy, int max_range, int damage, boo
         // Check boundaries
         if (next_x <= 1 || next_x >= MAP_WIDTH - 2 || 
             next_y <= 1 || next_y >= MAP_HEIGHT - 2) {
-            // Drop weapon at current position
-            if (map[current_y][current_x] == FLOOR || map[current_y][current_x] == '#') {
+            // Drop weapon at current position if it should be dropped
+            if (drops_after_hit && (map[current_y][current_x] == FLOOR || 
+                                  map[current_y][current_x] == '#')) {
                 map[current_y][current_x] = weapon_symbol;
-                mvprintw(40, 1, "Weapon dropped due to hitting boundary!");
+                equipped_weapon->count--;
+                mvprintw(38, 1, "Weapon hit boundary and dropped! (%d/%d remaining)", 
+                        equipped_weapon->count, equipped_weapon->max_stack);
+            } else {
+                mvprintw(38, 1, "Weapon hit boundary!");
             }
+            hit_something = true;
             break;
         }
         
@@ -2179,9 +2386,31 @@ void throw_weapon(location start, int dx, int dy, int max_range, int damage, boo
         // Check for enemy hit
         if (map[current_y][current_x] >= ENEMY_DEMON && 
             map[current_y][current_x] <= ENEMY_UNDEAD) {
-            damage_enemy(current_x, current_y, damage);
+            
+            // Calculate final damage including potion effects
+            int final_damage = damage;
+            if (damage_active) {
+                final_damage *= 2;
+                mvprintw(39, 1, "Damage boost active! (2x damage)");
+            }
+            
+            damage_enemy(current_x, current_y, final_damage);
             hit_something = true;
-            mvprintw(40, 1, "Weapon hit enemy!");
+            
+            // Reduce ammo count and drop weapon if necessary
+            equipped_weapon->count--;
+            if (drops_after_hit && equipped_weapon->count > 0) {
+                // Only drop if we still have ammo (prevent duplicating last weapon)
+                if (map[current_y-dy][current_x-dx] == FLOOR || 
+                    map[current_y-dy][current_x-dx] == '#') {
+                    map[current_y-dy][current_x-dx] = weapon_symbol;
+                }
+            }
+            
+            mvprintw(40, 1, "%s: %d/%d remaining", 
+                    equipped_weapon->name, 
+                    equipped_weapon->count, 
+                    equipped_weapon->max_stack);
             break;
         }
         
@@ -2190,11 +2419,16 @@ void throw_weapon(location start, int dx, int dy, int max_range, int damage, boo
             map[current_y][current_x] == HORIZ || 
             map[current_y][current_x] == PILLAR ||
             map[current_y][current_x] == DOOR) {
-            // Drop weapon at previous position
-            if (map[current_y-dy][current_x-dx] == FLOOR || 
-                map[current_y-dy][current_x-dx] == '#') {
+            
+            // Drop weapon at previous position if it should be dropped
+            if (drops_after_hit && (map[current_y-dy][current_x-dx] == FLOOR || 
+                                  map[current_y-dy][current_x-dx] == '#')) {
                 map[current_y-dy][current_x-dx] = weapon_symbol;
-                mvprintw(40, 1, "Weapon dropped after hitting obstacle!");
+                equipped_weapon->count--;
+                mvprintw(38, 1, "Weapon hit obstacle and dropped! (%d/%d remaining)", 
+                        equipped_weapon->count, equipped_weapon->max_stack);
+            } else {
+                mvprintw(38, 1, "Weapon hit obstacle!");
             }
             hit_something = true;
             break;
@@ -2203,12 +2437,24 @@ void throw_weapon(location start, int dx, int dy, int max_range, int damage, boo
     
     // If reached max range without hitting anything
     if (!hit_something && distance >= max_range) {
-        if (map[current_y][current_x] == FLOOR || map[current_y][current_x] == '#') {
+        if (drops_after_hit && (map[current_y][current_x] == FLOOR || 
+                              map[current_y][current_x] == '#')) {
             map[current_y][current_x] = weapon_symbol;
-            mvprintw(40, 1, "Weapon dropped at maximum range!");
+            equipped_weapon->count--;
+            mvprintw(38, 1, "Weapon dropped at maximum range! (%d/%d remaining)", 
+                    equipped_weapon->count, equipped_weapon->max_stack);
+        } else {
+            mvprintw(38, 1, "Weapon reached maximum range!");
         }
     }
     
+    // Check if we need to remove the weapon from inventory
+    if (equipped_weapon->count <= 0) {
+        mvprintw(39, 1, "Out of %s!", equipped_weapon->name);
+        remove_item_from_inventory(equipped_weapon);
+    }
+    
+    // Update display
     vision();
     refresh();
 }
@@ -2249,6 +2495,7 @@ int main() {
     initscr();
     init_map();
     init_inventory();
+    init_weapons();
     init_starting_weapon();
     memset(trap_locations, 0, sizeof(trap_locations));
     memset(revealed_traps, 0, sizeof(revealed_traps));
@@ -2383,7 +2630,7 @@ int main() {
                     current_hunger = MAX(0, current_hunger - HUNGER_DECREASE_RATE);
     
                 // Handle hunger effects
-                if (current_hunger >= 90) {  // When well fed
+                if (current_hunger >= 70) {  // When well fed
                 if (player_health < MAX_HEALTH) {
                 player_health = MIN(player_health + HUNGER_HEALTH_REGEN, MAX_HEALTH);
                 mvprintw(38, 1, "You feel well fed. Health regenerated!");
@@ -2499,18 +2746,8 @@ if (new_x == locked_door_location.x && new_y == locked_door_location.y && !door_
 
                         //check for food
                         
-                        else if (map[player.y][player.x] == FOOD) {
-                        if (player_inventory.count < MAX_INVENTORY) {
-                        map[player.y][player.x] = FLOOR;
-                        player_inventory.items[player_inventory.count].symbol = FOOD;
-                        player_inventory.items[player_inventory.count].name = "Food Ration";
-                        player_inventory.items[player_inventory.count].heal_value = FOOD_HEAL;
-                        player_inventory.items[player_inventory.count].isEquipped = false;
-                        player_inventory.count++;
-                        mvprintw(40, 1, "Picked up Food!");
-    } else {
-        mvprintw(40, 1, "Inventory full! Cannot pick up food!");
-    }
+else if (map[player.y][player.x] == FOOD) {
+    pickup_food(player.x, player.y);
 }
 
 else if (map[player.y][player.x] == GOLDEN_KEY) {
@@ -2713,36 +2950,32 @@ break;
 
     
 
-                case 'i':  // Open/close inventory
-                display_inventory();
-                while (1) {
-                int ch = getch();
-                if (ch == 'i') {
-                break;  // Exit inventory
-                } else if (ch >= '1' && ch <= '9') {
-                use_item(ch - '1');
-                display_inventory();  // Refresh inventory display
-                refresh();
-        }
-                else if(ch == 'd'){
-                    drop_item();
-                    display_inventory();
-                    refresh();
-                }
-                        else if(ch == 'c'){  // Combine broken keys
+case 'i':  // Open/close inventory
+    display_inventory();
+    while (1) {
+        int ch = getch();
+        if (ch == 'i') {
+            break;  // Exit inventory
+        } else if (ch >= '1' && ch <= '9') {
+            use_item(ch - '1');
+            display_inventory();  // Refresh inventory display
+            refresh();
+        } else if(ch == 'd') {
+            drop_item();
+            display_inventory();
+            refresh();
+        } else if(ch == 'c') {  // Combine broken keys
             combine_broken_keys();
             display_inventory();
             refresh();
         }
-
     }
     // Redraw the game screen
-            clear();
-            draw_borders();
-            vision();
-            //draw_map();
-            update_status_line(score, level, player_health, player, game_start_time);
-            break;
+    clear();
+    draw_borders();
+    vision();
+    update_status_line(score, level, player_health, player, game_start_time);
+    break;
 
         }
 

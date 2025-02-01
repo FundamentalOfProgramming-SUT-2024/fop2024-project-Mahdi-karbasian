@@ -26,6 +26,10 @@
 #define DAGGER_SYMBOL 'd'
 #define MAGIC_WAND_SYMBOL '%'
 #define ARROW_SYMBOL 'V'
+#define POTION_HEALTH 'H'
+#define POTION_SPEED 's'
+#define POTION_DAMAGE '7'
+#define POTION_DURATION 10  // Duration in moves
 #define MIN_ROOM_SIZE 4
 #define MAX_ROOM_SIZE 16
 #define MAX_ROOMS 12
@@ -61,6 +65,7 @@
 #define MAX_ENEMIES_NORMAL    3     // Original value
 #define MAX_ENEMIES_HIGH      4
 #define MAX_ENEMIES_VERY_HIGH 5
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
 
 // Global spawn rate controls
 
@@ -98,6 +103,11 @@ typedef struct {
     int throw_range;   // Maximum throwing range
     bool isKey;        // New: whether item is a key
     bool isBroken;     // New: whether key is broken
+    bool isPotion;
+    int potion_moves_left;  // For tracking duration
+    int speed_bonus;        // For speed potion
+    int damage_multiplier;  // For damage potion
+    int heal_rate;         // For health potion
 } Item;
 
 typedef struct {
@@ -154,7 +164,12 @@ Item sword;
 Item dagger;
 Item arrow;
 Item Magic_wand;
-
+int health_regen_rate = 0;
+int potion_moves_left = 0;
+int moves_since_potion = 0;
+bool speed_active = false;
+bool damage_active = false;
+bool health_active = false;
 char map[MAP_HEIGHT][MAP_WIDTH];
 location spawn;
 int i = 0;
@@ -173,6 +188,8 @@ float current_spawn_rate = 0.3f;
 int enemy_spawn_level = 3;
 bool door_unlocked = false;
 bool visited_tiles[MAP_HEIGHT][MAP_WIDTH] = {false};
+int speed_potion_moves = 0;
+const int SPEED_POTION_DURATION = 10; // Duration in moves
 void generate_password(void);
 void throw_weapon(location start, int dx, int dy, int max_range, int damage, bool drops_after_hit);
 void remove_item_from_inventory(Item* item);
@@ -389,7 +406,7 @@ void pickup_weapon(char weapon_symbol, int x, int y) {
                     player_inventory.items[i].count++;
                     map[y][x] = FLOOR;
                     mvprintw(40, 1, "Added %s to existing stack!", 
-                            player_inventory.items[i].name);
+                    player_inventory.items[i].name);
                     return;
                 }
             }
@@ -484,7 +501,6 @@ void display_inventory() {
                      player_inventory.items[i].damage,
                      player_inventory.items[i].isEquipped ? " [EQUIPPED]" : "");
             
-            // Add stack count if greater than 1
             if (player_inventory.items[i].count > 1) {
                 mvprintw(row, 50, " [%d/%d]", 
                         player_inventory.items[i].count, 
@@ -497,7 +513,7 @@ void display_inventory() {
     row += 2;
     mvprintw(row++, 1, "FOOD:");
     for (int i = 0; i < player_inventory.count; i++) {
-        if (!player_inventory.items[i].isWeapon) {
+        if (!player_inventory.items[i].isWeapon && !player_inventory.items[i].isPotion) {
             mvprintw(row++, 1, "%d. %c %s (Heals: %d)", 
                      i + 1,
                      player_inventory.items[i].symbol,
@@ -505,12 +521,24 @@ void display_inventory() {
                      player_inventory.items[i].heal_value);
         }
     }
-    
+
+    row += 2;
+    mvprintw(row++, 1, "POTIONS:");
+    for (int i = 0; i < player_inventory.count; i++) {
+        if (player_inventory.items[i].isPotion) {
+            mvprintw(row++, 1, "%d. %c %s", 
+                     i + 1,
+                     player_inventory.items[i].symbol,
+                     player_inventory.items[i].name);
+        }
+    }
+
     mvprintw(row + 2, 1, "Press 1-9 to use items or equip weapons");
     mvprintw(row + 3, 1, "Press 't' to throw equipped weapon");
     mvprintw(row + 4, 1, "Press 'i' to close inventory");
     refresh();
 }
+
 void init_enemy(Enemy* enemy, char type) {
     enemy->type = type;
     enemy->is_active = true;
@@ -543,7 +571,128 @@ void init_enemy(Enemy* enemy, char type) {
     }
 }
 
-// Place enemies in a room
+void place_potions(Room* rooms, int room_count) {
+    const float POTION_CHANCE = 0.4f;    // 40% chance for an enchant room to have potions
+    const int MAX_POTIONS = 2;           // Maximum 2 potions per enchant room
+    
+    for (int r = 0; r < room_count; r++) {
+        // Only place potions in enchant rooms (type 2)
+        if (rooms[r].room_type != 2) {
+            continue;
+        }
+
+        // Check if this enchant room should have potions
+        if ((rand() % 100) > (POTION_CHANCE * 100)) {
+            continue;
+        }
+
+        Room room = rooms[r];
+        int potions_placed = 0;
+        int attempts = 0;
+        const int MAX_ATTEMPTS = 20;
+        
+        while (potions_placed < MAX_POTIONS && attempts < MAX_ATTEMPTS) {
+            int x = room.x + 2 + (rand() % (room.width - 3));
+            int y = room.y + 2 + (rand() % (room.height - 3));
+            
+            if (map[y][x] == FLOOR) {
+                bool is_suitable = true;
+                
+                // Check surrounding area for other items
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dx = -1; dx <= 1; dx++) {
+                        char nearby_tile = map[y + dy][x + dx];
+                        if (nearby_tile == DOOR || 
+                            nearby_tile == STAIR || 
+                            nearby_tile == GOLD_SMALL ||
+                            nearby_tile == PILLAR ||
+                            nearby_tile == FOOD ||
+                            nearby_tile == POTION_HEALTH ||
+                            nearby_tile == POTION_SPEED ||
+                            nearby_tile == POTION_DAMAGE) {
+                            is_suitable = false;
+                            break;
+                        }
+                    }
+                    if (!is_suitable) break;
+                }
+                
+                if (is_suitable) {
+                    // Randomly choose potion type
+                    int potion_type = rand() % 3;
+                    switch(potion_type) {
+                        case 0: map[y][x] = POTION_HEALTH; break;
+                        case 1: map[y][x] = POTION_SPEED; break;
+                        case 2: map[y][x] = POTION_DAMAGE; break;
+                    }
+                    potions_placed++;
+                }
+            }
+            attempts++;
+        }
+    }
+}
+
+void pickup_potion(char potion_type, int x, int y) {
+    if (player_inventory.count >= MAX_INVENTORY) {
+        mvprintw(40, 1, "Inventory full! Cannot pick up potion!");
+        return;
+    }
+
+    Item* new_potion = &player_inventory.items[player_inventory.count];
+    new_potion->symbol = potion_type;
+    new_potion->isPotion = true;
+    new_potion->potion_moves_left = 0;
+    new_potion->isEquipped = false;
+    new_potion->isWeapon = false;  // Make sure it's not marked as a weapon
+
+    switch(potion_type) {
+        case POTION_HEALTH:
+            new_potion->name = "Health Potion";
+            new_potion->heal_rate = 2;
+            break;
+        case POTION_SPEED:
+            new_potion->name = "Speed Potion";
+            new_potion->speed_bonus = 2;
+            break;
+        case POTION_DAMAGE:
+            new_potion->name = "Damage Potion";
+            new_potion->damage_multiplier = 2;
+            break;
+    }
+
+    player_inventory.count++;
+    map[y][x] = FLOOR;
+    mvprintw(40, 1, "Picked up %s!", new_potion->name);
+}
+
+void use_potion(Item* potion) {
+    if (!potion->isPotion) return;
+
+    switch(potion->symbol) {
+        case POTION_HEALTH:
+            health_active = true;
+            health_regen_rate = 10;  // 10 health points per step
+            potion_moves_left = 10;  // Last for 10 steps
+            mvprintw(40, 1, "Health regeneration activated! +10 HP per step for 10 steps!");
+            break;
+        case POTION_SPEED:
+            speed_active = true;
+            speed_potion_moves = SPEED_POTION_DURATION;
+            mvprintw(40, 1, "Movement speed doubled for %d moves!", SPEED_POTION_DURATION);
+            break;
+        case POTION_DAMAGE:
+            damage_active = true;
+            potion->potion_moves_left = POTION_DURATION;
+            mvprintw(40, 1, "Weapon damage doubled for %d moves!", POTION_DURATION);
+            break;
+    }
+
+    // Remove the used potion
+    remove_item_from_inventory(potion);
+    refresh();
+}
+
 void place_enemies_in_room(Room room) {
     // Basic safety checks
     if (room.width < 5 || room.height < 5 || current_enemies.count >= MAX_ENEMIES) {
@@ -743,6 +892,7 @@ void update_enemy_tracking(Enemy* enemy, int player_x, int player_y) {
         }
     }
 }
+
 void clrtoline() {
     int y, x;
     getyx(stdscr, y, x);
@@ -836,7 +986,12 @@ void use_item(int index) {
         // Equip the selected weapon
         item->isEquipped = true;
         mvprintw(40, 1, "Equipped %s!", item->name);
-    } else if (item->symbol == FOOD) {
+    } 
+    else if (item->isPotion) {
+        use_potion(item);
+        mvprintw(40, 1, "Used %s!", item->name);
+    }
+    else if (item->symbol == FOOD) {
         if (player_health < MAX_HEALTH) {
             int heal_amount = item->heal_value;
             if (player_health + heal_amount > MAX_HEALTH) {
@@ -1691,6 +1846,7 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
     place_weapons(current_level.rooms, current_level.room_count);
     for (int i = 0; i < current_level.room_count; i++) {
     place_enemies_in_room(current_level.rooms[i]);
+    place_potions(current_level.rooms, current_level.room_count);
 }
     // Find the furthest room and set it as treasure room if on level 5
     Room furthest_room;
@@ -1844,6 +2000,17 @@ void update_status_line(int score, int level, int player_health, location player
 }
 
 void attack_with_weapon(location player, char weapon_type, int direction_x, int direction_y) {
+    // Find the equipped weapon in inventory
+    Item* equipped_weapon = NULL;
+    for(int i = 0; i < player_inventory.count; i++) {
+        if(player_inventory.items[i].isEquipped && player_inventory.items[i].isWeapon) {
+            equipped_weapon = &player_inventory.items[i];
+            break;
+        }
+    }
+
+    if (!equipped_weapon) return;
+
     switch(weapon_type) {
         case 'M': // Mace
         case 'I': // Sword
@@ -1855,8 +2022,11 @@ void attack_with_weapon(location player, char weapon_type, int direction_x, int 
                     int target_x = player.x + dx;
                     int target_y = player.y + dy;
                     
-                    // Check for enemies and apply damage
-                    int damage = (weapon_type == 'M') ? 5 : 10;
+                    // Calculate damage with potion effect
+                    int damage = equipped_weapon->damage;
+                    if (damage_active) {
+                        damage *= 2;  // Double damage when potion is active
+                    }
                     
                     // Check if target location contains an enemy
                     if (map[target_y][target_x] == ENEMY_DEMON ||
@@ -1871,15 +2041,33 @@ void attack_with_weapon(location player, char weapon_type, int direction_x, int 
             break;
             
         case 'D': // Dagger
-            throw_weapon(player, direction_x, direction_y, 5, 12, true);
+            {
+                int damage = equipped_weapon->damage;
+                if (damage_active) {
+                    damage *= 2;
+                }
+                throw_weapon(player, direction_x, direction_y, 5, damage, true);
+            }
             break;
             
         case '%': // Magic Wand
-            throw_weapon(player, direction_x, direction_y, 10, 15, false);
+            {
+                int damage = equipped_weapon->damage;
+                if (damage_active) {
+                    damage *= 2;
+                }
+                throw_weapon(player, direction_x, direction_y, 10, damage, false);
+            }
             break;
             
         case 'V': // Arrow
-            throw_weapon(player, direction_x, direction_y, 5, 5, false);
+            {
+                int damage = equipped_weapon->damage;
+                if (damage_active) {
+                    damage *= 2;
+                }
+                throw_weapon(player, direction_x, direction_y, 5, damage, false);
+            }
             break;
     }
 }
@@ -2160,12 +2348,23 @@ int main() {
                          map[new_y][new_x] == ENEMY_FIRE ||
                          map[new_y][new_x] == ENEMY_GIANT ||
                          map[new_y][new_x] == ENEMY_SNAKE ||
-                         map[new_y][new_x] == ENEMY_UNDEAD
+                         map[new_y][new_x] == ENEMY_UNDEAD ||
+                         map[new_y][new_x] == POTION_HEALTH || 
+                         map[new_y][new_x] == POTION_SPEED ||
+                         map[new_y][new_x] == POTION_DAMAGE
                          )) {
                         
                         // Clear old position
                         mvprintw(player.y, player.x, " ");
                         
+                       if (map[new_y][new_x] == POTION_HEALTH ||
+                       map[new_y][new_x] == POTION_SPEED ||
+                       map[new_y][new_x] == POTION_DAMAGE) {
+                        pickup_potion(map[new_y][new_x], new_x, new_y);
+                }   
+
+                
+
                         // Update player position
                         player.x = new_x;
                         player.y = new_y;
@@ -2312,9 +2511,83 @@ else if (map[player.y][player.x] == SWORD_SYMBOL ||
     pickup_weapon(map[player.y][player.x], player.x, player.y);
     refresh();
 }
-                    }
+if (speed_active) {
+    speed_potion_moves--;
+    if (speed_potion_moves <= 0) {
+        speed_active = false;
+        mvprintw(40, 1, "Speed potion effect has worn off!");
+        refresh();
+    } else {
+        mvprintw(40, 1, "Speed boost active! (%d moves left) Press arrow key for second move...", 
+                 speed_potion_moves);
+        refresh();
+        int second_move = getch();
+        if (second_move == KEY_UP || second_move == KEY_DOWN ||
+            second_move == KEY_LEFT || second_move == KEY_RIGHT) {
+            int new_x = player.x;
+            int new_y = player.y;
+            
+            switch (second_move) {
+                case KEY_UP:    new_y--; break;
+                case KEY_DOWN:  new_y++; break;
+                case KEY_LEFT:  new_x--; break;
+                case KEY_RIGHT: new_x++; break;
+            }
+            
+            // Check if second move is valid
+            if (new_y > 0 && new_y < MAP_HEIGHT - 1 && new_x > 0 && new_x < MAP_WIDTH - 1 &&
+                map[new_y][new_x] != VERTICAL && map[new_y][new_x] != HORIZ && 
+                map[new_y][new_x] != PILLAR &&
+                (map[new_y][new_x] == FLOOR || map[new_y][new_x] == DOOR ||
+                 map[new_y][new_x] == '#' || map[new_y][new_x] == GOLD_SMALL ||
+                 map[new_y][new_x] == GOLD_MEDIUM || map[new_y][new_x] == GOLD_LARGE ||
+                 map[new_y][new_x] == STAIR || map[new_y][new_x] == TRAP_HIDDEN ||
+                 map[new_y][new_x] == FOOD ||
+                 map[new_y][new_x] == SWORD_SYMBOL ||
+                 map[new_y][new_x] == DAGGER_SYMBOL ||
+                 map[new_y][new_x] == MAGIC_WAND_SYMBOL ||
+                 map[new_y][new_x] == ARROW_SYMBOL ||
+                 map[new_y][new_x] == PASSWORD_SYMBOL ||
+                 map[new_y][new_x] == LOCKED_DOOR ||
+                 map[new_y][new_x] == GOLDEN_KEY ||
+                 map[new_y][new_x] == BROKEN_KEY ||
+                 map[new_y][new_x] == POTION_HEALTH || 
+                 map[new_y][new_x] == POTION_SPEED ||
+                 map[new_y][new_x] == POTION_DAMAGE)) {
+                
+                // Clear old position
+                mvprintw(player.y, player.x, " ");
+                
+                // Process the second move (copy the same item pickup and interaction code from the first move)
+                // Handle item pickups and interactions
+                if (map[new_y][new_x] == GOLD_SMALL) {
+                    int gold_value = gold_values[new_y][new_x];
+                    map[new_y][new_x] = FLOOR;
+                    score += gold_value;
+                    mvprintw(40, 1, "You found a coin worth %d gold!", gold_value);
                 }
-                break;
+                // Add other item pickup handling here...
+                
+                // Update player position
+                player.x = new_x;
+                player.y = new_y;
+                
+                // Check for traps at new position
+                if (trap_locations[player.y][player.x] && !revealed_traps[player.y][player.x]) {
+                    player_health -= TRAP_DAMAGE;
+                    revealed_traps[player.y][player.x] = 1;
+                    map[player.y][player.x] = TRAP_VISIBLE;
+                    mvprintw(40, 1, "You stepped on a trap! -%d HP", TRAP_DAMAGE);
+                }
+            }
+        }
+        move(40, 1);
+        clrtoeol();  // Clear the speed boost message
+    }
+    }
+}
+break;
+}
 
                 case 'f': // Fight/Attack
     {
@@ -2354,6 +2627,8 @@ case 't': // Throw weapon
     }
     break;
 
+    
+
                 case 'i':  // Open/close inventory
                 display_inventory();
                 while (1) {
@@ -2363,13 +2638,17 @@ case 't': // Throw weapon
                 } else if (ch >= '1' && ch <= '9') {
                 use_item(ch - '1');
                 display_inventory();  // Refresh inventory display
+                refresh();
         }
                 else if(ch == 'd'){
                     drop_item();
+                    display_inventory();
+                    refresh();
                 }
                         else if(ch == 'c'){  // Combine broken keys
             combine_broken_keys();
             display_inventory();
+            refresh();
         }
 
     }
@@ -2536,6 +2815,25 @@ for (int i = 0; i < current_enemies.count && i < MAX_ENEMIES; i++) {
             }
         }
     }
+    // Add this after your movement switch statement and before enemy updates
+if (health_active && potion_moves_left > 0) {
+    if (player_health < MAX_HEALTH) {
+        int heal_amount = health_regen_rate;
+        if (player_health + heal_amount > MAX_HEALTH) {
+            heal_amount = MAX_HEALTH - player_health;
+        }
+        player_health += heal_amount;
+        mvprintw(39, 1, "Health regenerated! +%d HP (%d steps left)", 
+                 heal_amount, potion_moves_left);
+    }
+    
+    potion_moves_left--;
+    if (potion_moves_left <= 0) {
+        health_active = false;
+        health_regen_rate = 0;
+        mvprintw(40, 1, "Health regeneration effect has worn off!");
+    }
+}
 }
         // Update status lines
         update_status_line(score, level, player_health, player, game_start_time);

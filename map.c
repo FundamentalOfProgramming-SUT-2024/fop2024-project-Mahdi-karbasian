@@ -683,8 +683,9 @@ void use_potion(Item* potion) {
             break;
         case POTION_DAMAGE:
             damage_active = true;
-            potion->potion_moves_left = POTION_DURATION;
-            mvprintw(40, 1, "Weapon damage doubled for %d moves!", POTION_DURATION);
+            potion->potion_moves_left = POTION_DURATION;  // 10 moves
+            mvprintw(40, 1, "Damage doubled for next %d moves!", POTION_DURATION);
+            moves_since_potion = 0;
             break;
     }
 
@@ -2205,17 +2206,23 @@ void throw_weapon(location start, int dx, int dy, int max_range, int damage, boo
     refresh();
 }
 
-// Add this function to handle enemy damage
 void damage_enemy(int x, int y, int damage) {
     for (int i = 0; i < current_enemies.count; i++) {
         Enemy* enemy = &current_enemies.enemies[i];
         if (enemy->is_active && enemy->x == x && enemy->y == y) {
-            enemy->health -= damage;
+            // Apply damage multiplier if active
+            int final_damage = damage;
+            if (damage_active) {
+                final_damage *= 2;
+                mvprintw(38, 1, "Damage boost active! (%dx damage)", 2);
+            }
+            
+            enemy->health -= final_damage;
             
             // Display damage message
             attron(COLOR_PAIR(4) | A_BOLD);
             mvprintw(39, 1, "You hit %c for %d damage! (%d/%d HP)", 
-                    enemy->type, damage, enemy->health, enemy->max_health);
+                    enemy->type, final_damage, enemy->health, enemy->max_health);
             attroff(COLOR_PAIR(4) | A_BOLD);
             
             if (enemy->health <= 0) {
@@ -2585,6 +2592,17 @@ if (speed_active) {
         clrtoeol();  // Clear the speed boost message
     }
     }
+    if (damage_active) {
+    moves_since_potion++;
+    if (moves_since_potion >= POTION_DURATION) {
+        damage_active = false;
+        mvprintw(40, 1, "Damage potion effect has worn off!");
+        refresh();
+    } else {
+        mvprintw(39, 1, "Damage boost active! (%d moves left)", 
+                 POTION_DURATION - moves_since_potion);
+    }
+}
 }
 break;
 }

@@ -345,7 +345,7 @@ void init_weapons() {
 
     dagger.name = strdup("DAGGER");
     dagger.damage = 12;
-    dagger.symbol = 'D';
+    dagger.symbol = 'd';
     dagger.isEquipped = false;
     dagger.max_stack = 10;  // Can carry up to 10 daggers
 
@@ -2201,7 +2201,7 @@ void update_status_line(int score, int level, int player_health, location player
 }
 
 void attack_with_weapon(location player, char weapon_type, int direction_x, int direction_y) {
-    // Find the equipped weapon in inventory
+    // Find equipped weapon
     Item* equipped_weapon = NULL;
     for(int i = 0; i < player_inventory.count; i++) {
         if(player_inventory.items[i].isEquipped && player_inventory.items[i].isWeapon) {
@@ -2210,12 +2210,20 @@ void attack_with_weapon(location player, char weapon_type, int direction_x, int 
         }
     }
 
-    if (!equipped_weapon) return;
+    if (!equipped_weapon) {
+        mvprintw(40, 1, "No weapon equipped!");
+        refresh();
+        return;
+    }
+
+    // Debug message
+    mvprintw(38, 1, "Attacking with %s", equipped_weapon->name);
+    refresh();
 
     switch(weapon_type) {
         case 'M': // Mace
         case 'I': // Sword
-            // Attack all 8 adjacent tiles
+            // Attack all adjacent tiles
             for(int dy = -1; dy <= 1; dy++) {
                 for(int dx = -1; dx <= 1; dx++) {
                     if(dx == 0 && dy == 0) continue; // Skip player's position
@@ -2223,51 +2231,32 @@ void attack_with_weapon(location player, char weapon_type, int direction_x, int 
                     int target_x = player.x + dx;
                     int target_y = player.y + dy;
                     
-                    // Calculate damage with potion effect
-                    int damage = equipped_weapon->damage;
-                    if (damage_active) {
-                        damage *= 2;  // Double damage when potion is active
-                    }
-                    
-                    // Check if target location contains an enemy
-                    if (map[target_y][target_x] == ENEMY_DEMON ||
-                        map[target_y][target_x] == ENEMY_FIRE ||
-                        map[target_y][target_x] == ENEMY_GIANT ||
-                        map[target_y][target_x] == ENEMY_SNAKE ||
-                        map[target_y][target_x] == ENEMY_UNDEAD) {
-                        damage_enemy(target_x, target_y, damage);
+                    // Debug message for attack area
+                    mvprintw(39, 1, "Checking position %d,%d for enemies", target_x, target_y);
+                    refresh();
+
+                    char target = map[target_y][target_x];
+                    if (target == ENEMY_DEMON || target == ENEMY_FIRE || 
+                        target == ENEMY_GIANT || target == ENEMY_SNAKE || 
+                        target == ENEMY_UNDEAD) {
+                        
+                        int final_damage = equipped_weapon->damage;
+                        if (damage_active) {
+                            final_damage *= 2;
+                        }
+                        damage_enemy(target_x, target_y, final_damage);
                     }
                 }
             }
             break;
             
-        case 'D': // Dagger
-            {
-                int damage = equipped_weapon->damage;
-                if (damage_active) {
-                    damage *= 2;
-                }
-                throw_weapon(player, direction_x, direction_y, 5, damage, true);
-            }
-            break;
-            
+        case 'd': // Dagger
         case '%': // Magic Wand
-            {
-                int damage = equipped_weapon->damage;
-                if (damage_active) {
-                    damage *= 2;
-                }
-                throw_weapon(player, direction_x, direction_y, 10, damage, false);
-            }
-            break;
-            
         case 'V': // Arrow
-            {
-                int damage = equipped_weapon->damage;
-                if (damage_active) {
-                    damage *= 2;
-                }
-                throw_weapon(player, direction_x, direction_y, 5, damage, false);
+            if (direction_x != 0 || direction_y != 0) {
+                int range = (weapon_type == '%') ? 8 : 5; // Magic wand has longer range
+                throw_weapon(player, direction_x, direction_y, range, 
+                           equipped_weapon->damage, weapon_type == 'd');
             }
             break;
     }
@@ -2334,159 +2323,70 @@ void remove_item_from_inventory(Item* item) {
 void throw_weapon(location start, int dx, int dy, int max_range, int damage, bool drops_after_hit) {
     int current_x = start.x;
     int current_y = start.y;
-    int distance = 0;
     bool hit_something = false;
-    
-    // Get the equipped weapon
-    Item* equipped_weapon = NULL;
-    for(int i = 0; i < player_inventory.count; i++) {
-        if(player_inventory.items[i].isEquipped && player_inventory.items[i].isWeapon) {
-            equipped_weapon = &player_inventory.items[i];
-            break;
-        }
-    }
-    
-    if (!equipped_weapon || equipped_weapon->count <= 0) {
-        mvprintw(40, 1, "No weapon equipped or out of ammo!");
-        return;
-    }
-    
-    char weapon_symbol = equipped_weapon->symbol;
-    
-    // Clear previous messages
-    move(38, 1); clrtoeol();
-    move(39, 1); clrtoeol();
-    move(40, 1); clrtoeol();
-    
-    while (distance < max_range && !hit_something) {
-        int next_x = current_x + dx;
-        int next_y = current_y + dy;
-        distance++;
-        
+
+    // Debug message
+    mvprintw(37, 1, "Throwing weapon from %d,%d in direction %d,%d", 
+             start.x, start.y, dx, dy);
+    refresh();
+
+    for(int distance = 0; distance < max_range && !hit_something; distance++) {
+        current_x += dx;
+        current_y += dy;
+
         // Check boundaries
-        if (next_x <= 1 || next_x >= MAP_WIDTH - 2 || 
-            next_y <= 1 || next_y >= MAP_HEIGHT - 2) {
-            // Drop weapon at current position if it should be dropped
-            if (drops_after_hit && (map[current_y][current_x] == FLOOR || 
-                                  map[current_y][current_x] == '#')) {
-                map[current_y][current_x] = weapon_symbol;
-                equipped_weapon->count--;
-                mvprintw(38, 1, "Weapon hit boundary and dropped! (%d/%d remaining)", 
-                        equipped_weapon->count, equipped_weapon->max_stack);
-            } else {
-                mvprintw(38, 1, "Weapon hit boundary!");
-            }
-            hit_something = true;
+        if(current_x <= 1 || current_x >= MAP_WIDTH-2 || 
+           current_y <= 1 || current_y >= MAP_HEIGHT-2) {
             break;
         }
-        
-        current_x = next_x;
-        current_y = next_y;
-        
+
+        char target = map[current_y][current_x];
+        mvprintw(38, 1, "Checking position %d,%d (found: %c)", 
+                 current_x, current_y, target);
+        refresh();
+
         // Check for enemy hit
-        if (map[current_y][current_x] >= ENEMY_DEMON && 
-            map[current_y][current_x] <= ENEMY_UNDEAD) {
-            
-            // Calculate final damage including potion effects
+        if(target >= ENEMY_DEMON && target <= ENEMY_UNDEAD) {
             int final_damage = damage;
-            if (damage_active) {
+            if(damage_active) {
                 final_damage *= 2;
-                mvprintw(39, 1, "Damage boost active! (2x damage)");
             }
-            
             damage_enemy(current_x, current_y, final_damage);
             hit_something = true;
-            
-            // Reduce ammo count and drop weapon if necessary
-            equipped_weapon->count--;
-            if (drops_after_hit && equipped_weapon->count > 0) {
-                // Only drop if we still have ammo (prevent duplicating last weapon)
-                if (map[current_y-dy][current_x-dx] == FLOOR || 
-                    map[current_y-dy][current_x-dx] == '#') {
-                    map[current_y-dy][current_x-dx] = weapon_symbol;
-                }
-            }
-            
-            mvprintw(40, 1, "%s: %d/%d remaining", 
-                    equipped_weapon->name, 
-                    equipped_weapon->count, 
-                    equipped_weapon->max_stack);
             break;
         }
-        
-        // Check for walls/obstacles
-        if (map[current_y][current_x] == VERTICAL || 
-            map[current_y][current_x] == HORIZ || 
-            map[current_y][current_x] == PILLAR ||
-            map[current_y][current_x] == DOOR) {
-            
-            // Drop weapon at previous position if it should be dropped
-            if (drops_after_hit && (map[current_y-dy][current_x-dx] == FLOOR || 
-                                  map[current_y-dy][current_x-dx] == '#')) {
-                map[current_y-dy][current_x-dx] = weapon_symbol;
-                equipped_weapon->count--;
-                mvprintw(38, 1, "Weapon hit obstacle and dropped! (%d/%d remaining)", 
-                        equipped_weapon->count, equipped_weapon->max_stack);
-            } else {
-                mvprintw(38, 1, "Weapon hit obstacle!");
-            }
-            hit_something = true;
+
+        // Check for obstacles
+        if(target == VERTICAL || target == HORIZ || 
+           target == PILLAR || target == DOOR) {
             break;
         }
     }
-    
-    // If reached max range without hitting anything
-    if (!hit_something && distance >= max_range) {
-        if (drops_after_hit && (map[current_y][current_x] == FLOOR || 
-                              map[current_y][current_x] == '#')) {
-            map[current_y][current_x] = weapon_symbol;
-            equipped_weapon->count--;
-            mvprintw(38, 1, "Weapon dropped at maximum range! (%d/%d remaining)", 
-                    equipped_weapon->count, equipped_weapon->max_stack);
-        } else {
-            mvprintw(38, 1, "Weapon reached maximum range!");
-        }
-    }
-    
-    // Check if we need to remove the weapon from inventory
-    if (equipped_weapon->count <= 0) {
-        mvprintw(39, 1, "Out of %s!", equipped_weapon->name);
-        remove_item_from_inventory(equipped_weapon);
-    }
-    
-    // Update display
-    vision();
-    refresh();
 }
 
 void damage_enemy(int x, int y, int damage) {
     for (int i = 0; i < current_enemies.count; i++) {
         Enemy* enemy = &current_enemies.enemies[i];
         if (enemy->is_active && enemy->x == x && enemy->y == y) {
-            // Apply damage multiplier if active
-            int final_damage = damage;
-            if (damage_active) {
-                final_damage *= 2;
-                mvprintw(38, 1, "Damage boost active! (%dx damage)", 2);
-            }
+            // Apply damage
+            enemy->health -= damage;
             
-            enemy->health -= final_damage;
-            
-            // Display damage message
+            // Debug message to confirm hit
             attron(COLOR_PAIR(4) | A_BOLD);
-            mvprintw(39, 1, "You hit %c for %d damage! (%d/%d HP)", 
-                    enemy->type, final_damage, enemy->health, enemy->max_health);
+            mvprintw(39, 1, "Hit enemy %c for %d damage! (Health: %d/%d)", 
+                    enemy->type, damage, enemy->health, enemy->max_health);
             attroff(COLOR_PAIR(4) | A_BOLD);
             
             if (enemy->health <= 0) {
+                // Kill enemy
                 enemy->is_active = false;
-                map[enemy->y][enemy->x] = FLOOR;
+                map[enemy->y][enemy->x] = FLOOR;  // Clear enemy from map
                 attron(COLOR_PAIR(4) | A_BOLD);
-                mvprintw(38, 1, "You defeated the %c!", enemy->type);
+                mvprintw(38, 1, "Enemy %c defeated!", enemy->type);
                 attroff(COLOR_PAIR(4) | A_BOLD);
             }
             refresh();
-            break;
+            return;  // Exit after finding and damaging enemy
         }
     }
 }
@@ -2867,60 +2767,54 @@ if (speed_active) {
 break;
 }
 
-     case ' ': // Space bar
-{
-    // Find equipped weapon
-    Item* equipped_weapon = NULL;
-    for(int i = 0; i < player_inventory.count; i++) {
-        if(player_inventory.items[i].isEquipped && player_inventory.items[i].isWeapon) {
-            equipped_weapon = &player_inventory.items[i];
+case ' ':  // SPACE key for attacks
+    {
+        // Find equipped weapon
+        Item* equipped_weapon = NULL;
+        for(int i = 0; i < player_inventory.count; i++) {
+            if(player_inventory.items[i].isEquipped && player_inventory.items[i].isWeapon) {
+                equipped_weapon = &player_inventory.items[i];
+                break;
+            }
+        }
+        
+        if(!equipped_weapon) {
+            mvprintw(40, 1, "No weapon equipped!");
+            refresh();
             break;
         }
-    }
-    
-    if(!equipped_weapon) {
-        mvprintw(40, 1, "No weapon equipped!");
-        break;
-    }
 
-    if(equipped_weapon->count <= 0) {
-        mvprintw(40, 1, "Out of ammo!");
-        break;
-    }
-
-    // For melee weapons (sword and mace)
-    if(equipped_weapon->symbol == 'M' || equipped_weapon->symbol == 'I') {
-        attack_with_weapon((location){player.x, player.y}, 
-                         equipped_weapon->symbol, 0, 0);
-        last_shot_made = true;
-    } else {
-        // For ranged weapons
-        mvprintw(40, 1, "Choose direction (arrow keys)");
-        refresh();
-        int dir = getch();
-        int dx = 0, dy = 0;
-        
-        switch(dir) {
-            case KEY_UP:    dy = -1; break;
-            case KEY_DOWN:  dy = 1;  break;
-            case KEY_LEFT:  dx = -1; break;
-            case KEY_RIGHT: dx = 1;  break;
-            default: 
-                mvprintw(40, 1, "Invalid direction!");
-                break;
-        }
-        
-        if(dx != 0 || dy != 0) {
-            last_shot_dx = dx;
-            last_shot_dy = dy;
-            last_shot_made = true;
-            throw_weapon((location){player.x, player.y}, dx, dy, 
-                        equipped_weapon->throw_range, 
-                        equipped_weapon->damage, true);
+        // For melee weapons (sword and mace)
+        if(equipped_weapon->symbol == 'M' || equipped_weapon->symbol == 'I') {
+            attack_with_weapon((location){player.x, player.y}, 
+                             equipped_weapon->symbol, 0, 0);
+        } else {
+            // For ranged weapons
+            mvprintw(40, 1, "Choose direction (arrow keys)");
+            refresh();
+            int dir = getch();
+            int dx = 0, dy = 0;
+            
+            switch(dir) {
+                case KEY_UP:    dy = -1; break;
+                case KEY_DOWN:  dy = 1;  break;
+                case KEY_LEFT:  dx = -1; break;
+                case KEY_RIGHT: dx = 1;  break;
+                default: 
+                    mvprintw(40, 1, "Invalid direction!");
+                    refresh();
+                    break;
+            }
+            
+            if(dx != 0 || dy != 0) {
+                throw_weapon((location){player.x, player.y}, dx, dy, 
+                           equipped_weapon->throw_range, 
+                           equipped_weapon->damage, 
+                           equipped_weapon->symbol == 'D');  // Only daggers drop
+            }
         }
     }
-}
-break;
+    break;
 
 case 'a': // Repeat last shot
     if(last_shot_made) {

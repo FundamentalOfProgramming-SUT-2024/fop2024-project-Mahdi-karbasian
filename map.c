@@ -39,6 +39,10 @@
 #define BROKEN_KEY 'k'  // Symbol for broken key
 #define KEY_BREAK_CHANCE 10  // 10% chance of breaking
 
+#define HIDDEN_DOOR '!'  // Looks like a wall but can be discovered
+#define SECRET_ROOM_TYPE 4  // New room type for secret rooms
+#define MAX_SECRET_ROOMS 2  // Maximum number of secret rooms per level
+
 #define MAP_WIDTH 160
 #define MAP_HEIGHT 40
 #define MAX_INVENTORY 10
@@ -221,7 +225,9 @@ void damage_enemy(int x, int y, int damage);
 void attack_with_weapon(location player, char weapon_type, int direction_x, int direction_y);
 void handle_attack(int key);
 void draw_borders(void);
-
+bool check_room_overlap(Room new_room, Room* rooms, int room_count);
+void draw_room(Room room);
+void add_secret_rooms(void);
 
 void init_map() {
     for (int y = 0; y < MAP_HEIGHT; y++) {
@@ -593,6 +599,166 @@ void init_inventory() {
         player_inventory.items[i].category = CAT_WEAPON; // Default category
         player_inventory.items[i].count = 0;
         player_inventory.items[i].max_stack = 1;
+    }
+}
+
+void add_secret_rooms(void) {
+    int secret_rooms_added = 0;
+    
+    // Try to add secret rooms to existing regular rooms
+    for (int r = 0; r < current_level.room_count && secret_rooms_added < MAX_SECRET_ROOMS; r++) {
+        // Only try to add secret rooms to regular rooms
+        if (current_level.rooms[r].room_type != 3) continue;
+
+        Room* current_room = &current_level.rooms[r];
+        
+        // Try each wall of the room
+        int wall = rand() % 4;  // 0=north, 1=east, 2=south, 3=west
+        
+        Room secret_room;
+        secret_room.width = 5 + (rand() % 3);   // Small room: 5-7 width
+        secret_room.height = 5 + (rand() % 3);  // Small room: 5-7 height
+        secret_room.room_type = SECRET_ROOM_TYPE;
+        secret_room.visited = false;
+        
+        // Position the secret room based on which wall we're using
+        switch(wall) {
+            case 0: // North wall
+                secret_room.x = current_room->x + 2;
+                secret_room.y = current_room->y - secret_room.height - 1;
+                break;
+            case 1: // East wall
+                secret_room.x = current_room->x + current_room->width + 1;
+                secret_room.y = current_room->y + 2;
+                break;
+            case 2: // South wall
+                secret_room.x = current_room->x + 2;
+                secret_room.y = current_room->y + current_room->height + 1;
+                break;
+            case 3: // West wall
+                secret_room.x = current_room->x - secret_room.width - 1;
+                secret_room.y = current_room->y + 2;
+                break;
+        }
+        
+        // Check if we can place the room here
+        if (secret_room.x > 2 && secret_room.y > 2 && 
+            secret_room.x + secret_room.width < MAP_WIDTH - 3 && 
+            secret_room.y + secret_room.height < MAP_HEIGHT - 3) {
+            
+            bool can_place = true;
+            // Check for overlap with other rooms
+            for (int i = 0; i < current_level.room_count; i++) {
+                if (secret_room.x <= current_level.rooms[i].x + current_level.rooms[i].width + 1 &&
+                    secret_room.x + secret_room.width >= current_level.rooms[i].x - 1 &&
+                    secret_room.y <= current_level.rooms[i].y + current_level.rooms[i].height + 1 &&
+                    secret_room.y + secret_room.height >= current_level.rooms[i].y - 1) {
+                    can_place = false;
+                    break;
+                }
+            }
+            
+            if (can_place) {
+                // Draw the secret room
+                for (int y = secret_room.y; y <= secret_room.y + secret_room.height; y++) {
+                    for (int x = secret_room.x; x <= secret_room.x + secret_room.width; x++) {
+                        if (y == secret_room.y || y == secret_room.y + secret_room.height)
+                            map[y][x] = HORIZ;
+                        else if (x == secret_room.x || x == secret_room.x + secret_room.width)
+                            map[y][x] = VERTICAL;
+                        else
+                            map[y][x] = FLOOR;
+                    }
+                }
+                
+                // Place the hidden door in the existing room's wall
+                int door_x, door_y;
+                switch(wall) {
+                    case 0: // North wall - door in current room's north wall
+                        door_x = current_room->x + current_room->width/2;
+                        door_y = current_room->y;
+                        break;
+                    case 1: // East wall - door in current room's east wall
+                        door_x = current_room->x + current_room->width;
+                        door_y = current_room->y + current_room->height/2;
+                        break;
+                    case 2: // South wall - door in current room's south wall
+                        door_x = current_room->x + current_room->width/2;
+                        door_y = current_room->y + current_room->height;
+                        break;
+                    case 3: // West wall - door in current room's west wall
+                        door_x = current_room->x;
+                        door_y = current_room->y + current_room->height/2;
+                        break;
+                }
+                
+                // Place the hidden door
+                map[door_y][door_x] = HIDDEN_DOOR;
+                
+                // Create a corridor between the rooms
+                int corridor_x1 = door_x;
+                int corridor_y1 = door_y;
+                int corridor_x2, corridor_y2;
+                
+                switch(wall) {
+                    case 0: // North wall
+                        corridor_x2 = door_x;
+                        corridor_y2 = secret_room.y + secret_room.height;
+                        break;
+                    case 1: // East wall
+                        corridor_x2 = secret_room.x;
+                        corridor_y2 = door_y;
+                        break;
+                    case 2: // South wall
+                        corridor_x2 = door_x;
+                        corridor_y2 = secret_room.y;
+                        break;
+                    case 3: // West wall
+                        corridor_x2 = secret_room.x + secret_room.width;
+                        corridor_y2 = door_y;
+                        break;
+                }
+                
+                // Draw corridor
+                int min_x = (corridor_x1 < corridor_x2) ? corridor_x1 : corridor_x2;
+                int max_x = (corridor_x1 > corridor_x2) ? corridor_x1 : corridor_x2;
+                int min_y = (corridor_y1 < corridor_y2) ? corridor_y1 : corridor_y2;
+                int max_y = (corridor_y1 > corridor_y2) ? corridor_y1 : corridor_y2;
+                
+                for (int x = min_x; x <= max_x; x++) {
+                    for (int y = min_y; y <= max_y; y++) {
+                        if (map[y][x] != HIDDEN_DOOR) {
+                            map[y][x] = FLOOR;
+                        }
+                    }
+                }
+                
+                // Add special loot to the secret room
+                for (int i = 0; i < 3; i++) {
+                    int x = secret_room.x + 1 + (rand() % (secret_room.width - 2));
+                    int y = secret_room.y + 1 + (rand() % (secret_room.height - 2));
+                    if (map[y][x] == FLOOR) {
+                        switch(rand() % 3) {
+                            case 0:
+                                map[y][x] = GOLD_SMALL;
+                                gold_values[y][x] = 10;  // Higher value gold
+                                break;
+                            case 1:
+                                map[y][x] = POTION_HEALTH;
+                                break;
+                            case 2:
+                                map[y][x] = MAGIC_WAND_SYMBOL;
+                                break;
+                        }
+                    }
+                }
+                
+                // Store the room
+                current_level.rooms[current_level.room_count] = secret_room;
+                current_level.room_count++;
+                secret_rooms_added++;
+            }
+        }
     }
 }
 
@@ -1285,6 +1451,9 @@ void draw_room(Room room) {
             break;
         case 2: // Enchant room
             color_pair = 7;
+            break;
+        case SECRET_ROOM_TYPE: // Secret room
+            color_pair = 8;  // Use a different color for secret rooms
             break;
         default: // Regular room
             color_pair = 6;
@@ -2015,7 +2184,8 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
         fprintf(stderr, "Error: Could not generate minimum number of rooms\n");
         exit(1);
     }
-        place_golden_key(current_level.rooms, current_level.room_count);
+    add_secret_rooms();
+    place_golden_key(current_level.rooms, current_level.room_count);
     create_corridors(current_level.rooms, current_level.room_count);
     place_doors();
     place_locked_door_and_password(current_level.rooms, current_level.room_count);
@@ -2762,7 +2932,18 @@ if (speed_active) {
                 case KEY_LEFT:  new_x--; break;
                 case KEY_RIGHT: new_x++; break;
             }
-            
+            if (new_y > 0 && new_y < MAP_HEIGHT - 1 && new_x > 0 && new_x < MAP_WIDTH - 1) 
+                // Check if player hit a hidden door
+                if (map[new_y][new_x] == HIDDEN_DOOR) {
+                    // Reveal the hidden door
+                    map[new_y][new_x] = DOOR;
+                    mvprintw(40, 1, "You discovered a hidden door!");
+                    refresh();
+                    // Allow movement through the door
+                    player.x = new_x;
+                    player.y = new_y;
+                }
+
             // Check if second move is valid
             if (new_y > 0 && new_y < MAP_HEIGHT - 1 && new_x > 0 && new_x < MAP_WIDTH - 1 &&
                 map[new_y][new_x] != VERTICAL && map[new_y][new_x] != HORIZ && 
@@ -2904,7 +3085,15 @@ case 'a': // Repeat last shot
     }
 break;
 
-    
+case 'm':
+clear();
+draw_map();
+update_status_line(score, level, player_health, player, game_start_time);
+draw_borders();
+refresh();   
+getch();
+// napms(2000);
+break; 
 
 case 'i':  // Open/close inventory
     display_inventory();

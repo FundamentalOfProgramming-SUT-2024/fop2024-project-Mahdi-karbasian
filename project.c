@@ -5516,19 +5516,13 @@ refresh();
 
 else if(selected == 1) { //load game
     clear();
-    if (handle_load_game(current_user)) {
-        // Successfully loaded game
-        clear();
-        draw_borders();
-        vision();
-        update_status_line(score, level, player_health, player, game_start_time);
-        refresh();
-        game_loop();  // Start the game with loaded state
-    } else {
-        // Load failed or was cancelled
-        clear();
-        main_menu();
-    }
+mvprintw(5,5,"due to some issues in develpment we are sorry but for loading a game you should start a new game and from there you can load a save");
+mvprintw(7,5,"                                    WE ARE SO SORRY TO PUT YOU THROUGH THIS MUCH TROUBLE! ") ;
+mvprintw(9,5,"press any key to go back to the menu");
+getch();
+clear();
+main_menu();
+refresh();
 }
                     else if(selected == 2){ //profile
                         clear();

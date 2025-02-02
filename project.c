@@ -9,6 +9,9 @@
 #include <limits.h>
 #include <locale.h>
 #include <wchar.h>
+#include <glob.h>
+#include <sys/stat.h>
+#include <libgen.h>
 
 #define VERTICAL '|'
 #define HORIZ '_'
@@ -80,6 +83,30 @@ bool in_nightmare_room = false;
 #define MAX_ENEMIES_VERY_HIGH 5
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
+
+// Difficulty-based spawn rates for enemies
+#define ENEMY_SPAWN_EASY    0.3f   // 30% chance per room
+#define ENEMY_SPAWN_MEDIUM  0.6f   // 60% chance per room
+#define ENEMY_SPAWN_HARD    0.9f   // 90% chance per room
+
+// Maximum enemies per room based on difficulty
+#define MAX_ENEMIES_EASY    2
+#define MAX_ENEMIES_MEDIUM  4
+#define MAX_ENEMIES_HARD    6
+
+// Food spawn rates based on difficulty
+#define FOOD_SPAWN_EASY     1.0f   // 90% chance per room
+#define FOOD_SPAWN_MEDIUM   0.8f   // 60% chance per room
+#define FOOD_SPAWN_HARD     0.5f   // 30% chance per room
+
+// Food amount per room based on difficulty
+#define FOOD_PER_ROOM_EASY    6
+#define FOOD_PER_ROOM_MEDIUM  4
+#define FOOD_PER_ROOM_HARD    2
+
+#define HUNGER_DECREASE_EASY    1
+#define HUNGER_DECREASE_MEDIUM  1
+#define HUNGER_DECREASE_HARD    1
 
 
 
@@ -205,7 +232,45 @@ typedef struct {
 
 Level current_level;
 
-
+typedef struct {
+    location player;
+    int player_health;
+    int current_hunger;
+    int score;
+    int level;
+    time_t game_start_time;
+    Inventory player_inventory;
+    char map[MAP_HEIGHT][MAP_WIDTH];
+    bool trap_locations[MAP_HEIGHT][MAP_WIDTH];
+    bool revealed_traps[MAP_HEIGHT][MAP_WIDTH];
+    int gold_values[MAP_HEIGHT][MAP_WIDTH];
+    bool visited_tiles[MAP_HEIGHT][MAP_WIDTH];
+    Level current_level;
+    EnemyList current_enemies;
+    bool speed_active;
+    bool damage_active;
+    bool health_active;
+    int speed_potion_moves;
+    int potion_moves_left;
+    int moves_since_potion;
+    int health_regen_rate;
+    bool password_shown;
+    bool door_unlocked;
+    char current_password[5];
+    location password_location;
+    location locked_door_location;
+    bool sword_collected;
+    bool sword_placed;
+    bool in_nightmare_room;
+    int door_count;
+    location doors[MAX_ROOMS * 2];
+    int last_shot_dx;
+    int last_shot_dy;
+    bool last_shot_made;
+    char save_name[50];
+    char timestamp[26];
+    int difficulty_level;
+} GameState;
 
 
 /*
@@ -226,41 +291,98 @@ Item Magic_wand;
 int player_speed = 1;           // Base speed
 int speed_potion_duration = 0;  // Duration counter for speed effect
 time_t speed_potion_start = 0;  // When the speed effect started
-bool speed_active = false;      // Track if speed boost is active
-int health_regen_rate = 0;
-int potion_moves_left = 0;
-int moves_since_potion = 0;
+//bool speed_active = false;      // Track if speed boost is active
+//int health_regen_rate = 0;
+//int potion_moves_left = 0;
+//int moves_since_potion = 0;
 // bool speed_active = false;
-bool damage_active = false;
-bool health_active = false;
+//bool damage_active = false;
+//bool health_active = false;
 char map[MAP_HEIGHT][MAP_WIDTH];
 location spawn;
-int i = 0;
+//int i = 0;
 location doors[MAX_ROOMS * 2];
-int player_health = MAX_HEALTH;
-char revealed_traps[MAP_HEIGHT][MAP_WIDTH] = {0}; // Tracks revealed traps
-bool trap_locations[MAP_HEIGHT][MAP_WIDTH] = {{false}};  // Tracks where traps are
-int gold_values[MAP_HEIGHT][MAP_WIDTH] = {{0}};
+//int player_health = MAX_HEALTH;
+//bool revealed_traps[MAP_HEIGHT][MAP_WIDTH] = {false}; // Tracks revealed traps 
+//bool trap_locations[MAP_HEIGHT][MAP_WIDTH] = {{false}};  // Tracks where traps are
+//int gold_values[MAP_HEIGHT][MAP_WIDTH] = {{0}};
 bool hidden_door = false;
 char current_password[5]; // 4 chars + null terminator
-bool password_shown = false;
+//bool password_shown = false;
 time_t password_show_time = 0;
 location password_location;
 location locked_door_location;
 float current_spawn_rate = 0.3f;
 int enemy_spawn_level = 3;
-bool door_unlocked = false;
-bool visited_tiles[MAP_HEIGHT][MAP_WIDTH] = {false};
-int speed_potion_moves = 0;
+//bool door_unlocked = false;
+//bool visited_tiles[MAP_HEIGHT][MAP_WIDTH] = {false};
+//int speed_potion_moves = 0;
 const int SPEED_POTION_DURATION = 10; // Duration in moves
-int current_hunger = MAX_HUNGER;
-int last_shot_dx = 0;
-int last_shot_dy = 0;
-bool last_shot_made = false;
+//int current_hunger = MAX_HUNGER;
+// int last_shot_dx = 0;
+// int last_shot_dy = 0;
+// bool last_shot_made = false;
 bool damage_boost = false;
 int damage_boost_turns = 0;
 bool speed_boost = false;
 int speed_boost_turns = 0;
+
+// Add these definitions at the global scope (outside of any function)
+
+// Game state variables
+int score = 0;
+int level = 1;
+time_t game_start_time;
+
+// Player state
+location player;
+int player_health = MAX_HEALTH;
+int current_hunger = MAX_HUNGER;
+
+// Inventory
+Inventory player_inventory;
+
+// Map state
+char map[MAP_HEIGHT][MAP_WIDTH];
+bool trap_locations[MAP_HEIGHT][MAP_WIDTH] = {false};
+bool revealed_traps[MAP_HEIGHT][MAP_WIDTH] = {false};
+int gold_values[MAP_HEIGHT][MAP_WIDTH] = {0};
+bool visited_tiles[MAP_HEIGHT][MAP_WIDTH] = {false};
+
+// Level and enemies
+Level current_level;
+EnemyList current_enemies;
+
+// Effect states
+bool speed_active = false;
+bool damage_active = false;
+bool health_active = false;
+int speed_potion_moves = 0;
+int potion_moves_left = 0;
+int moves_since_potion = 0;
+int health_regen_rate = 0;
+
+// Game flags
+bool password_shown = false;
+bool door_unlocked = false;
+char current_password[5];
+location password_location;
+location locked_door_location;
+// bool sword_collected = false;
+// bool sword_placed = false;
+// bool in_nightmare_room = false;
+
+// Door state
+int i = 0;  // door counter
+location doors[MAX_ROOMS * 2];
+
+// Last shot information
+int last_shot_dx = 0;
+int last_shot_dy = 0;
+bool last_shot_made = false;
+
+// Game settings
+// int dif_lvl = 1;
 
 static int selected = 0;
 static char current_user[50] = "";
@@ -269,7 +391,42 @@ static int dif_lvl = 1;
 static int current_color = 4;  // Default to WHITE (4)
 static int game_color = 4;     // Game color setting
 
-
+// In your header section or at the top of your file
+extern int score;
+extern int level;
+extern time_t game_start_time;
+extern location player;
+extern int player_health;
+extern int current_hunger;
+extern Inventory player_inventory;
+extern char map[MAP_HEIGHT][MAP_WIDTH];
+extern bool trap_locations[MAP_HEIGHT][MAP_WIDTH];
+extern bool revealed_traps[MAP_HEIGHT][MAP_WIDTH];
+extern int gold_values[MAP_HEIGHT][MAP_WIDTH];
+extern bool visited_tiles[MAP_HEIGHT][MAP_WIDTH];
+extern Level current_level;
+extern EnemyList current_enemies;
+extern bool speed_active;
+extern bool damage_active;
+extern bool health_active;
+extern int speed_potion_moves;
+extern int potion_moves_left;
+extern int moves_since_potion;
+extern int health_regen_rate;
+extern bool password_shown;
+extern bool door_unlocked;
+extern char current_password[5];
+extern location password_location;
+extern location locked_door_location;
+extern bool sword_collected;
+extern bool sword_placed;
+extern bool in_nightmare_room;
+extern int i;
+extern location doors[MAX_ROOMS * 2];
+extern int last_shot_dx;
+extern int last_shot_dy;
+extern bool last_shot_made;
+extern int dif_lvl;
 
 ///////////////////////////////////////////////////////////////
 
@@ -322,6 +479,22 @@ bool check_room_overlap(Room new_room, Room* rooms, int room_count);
 void draw_room(Room room);
 
 void add_secret_rooms(void);
+
+void save_game(GameState* state, const char* username, const char* save_name);
+
+GameState* load_game(const char* username, const char* save_name);
+
+void list_saved_games(const char* username, char saves[][50], int* save_count);
+
+void handle_save_game(const char* username);
+
+bool handle_load_game(const char* username);
+
+void pause_menu(void);
+
+void vision(void);
+
+void update_status_line(int score, int level, int player_health, location player, time_t start_time);
 //////////////////////////////////////////////////////////////////////////////////
 
 void init_map() {
@@ -435,6 +608,286 @@ void place_locked_door_and_password(Room* rooms, int room_count) {
         generate_password();
         door_unlocked = false;
     }
+}
+
+void pause_menu(void) {
+    clear();
+    mvprintw(10, 20, "GAME PAUSED");
+    mvprintw(12, 20, "1. Resume Game");
+    mvprintw(13, 20, "2. Save Game");
+    mvprintw(14, 20, "3. Load Game");
+    mvprintw(15, 20, "4. Quit to Main Menu");
+    refresh();
+    
+    int choice = getch();
+    switch(choice) {
+        case '1':
+            return;
+        case '2':
+            handle_save_game(current_user);
+            break;
+        case '3':
+            handle_load_game(current_user);
+            break;
+        case '4':
+            // Handle quitting to main menu
+            break;
+    }
+}
+
+void save_game(GameState* state, const char* username, const char* save_name) {
+    char filename[100];
+    snprintf(filename, sizeof(filename), "saves/%s_%s.sav", username, save_name);
+    
+    // Create saves directory if it doesn't exist
+    #ifdef _WIN32
+        _mkdir("saves");
+    #else
+        mkdir("saves", 0777);
+    #endif
+    
+    FILE* file = fopen(filename, "wb");
+    if (!file) {
+        mvprintw(40, 1, "Error: Could not create save file!");
+        refresh();
+        return;
+    }
+    
+    // Get current timestamp
+    time_t now = time(NULL);
+    strftime(state->timestamp, sizeof(state->timestamp), 
+             "%Y-%m-%d %H:%M:%S", localtime(&now));
+    
+    // Write the entire state to file
+    fwrite(state, sizeof(GameState), 1, file);
+    fclose(file);
+    
+    mvprintw(40, 1, "Game saved successfully as '%s'", save_name);
+    refresh();
+}
+
+GameState* load_game(const char* username, const char* save_name) {
+    char filename[100];
+    snprintf(filename, sizeof(filename), "saves/%s_%s.sav", username, save_name);
+    
+    FILE* file = fopen(filename, "rb");
+    if (!file) {
+        mvprintw(40, 1, "Error: Could not find save file!");
+        refresh();
+        return NULL;
+    }
+    
+    GameState* state = malloc(sizeof(GameState));
+    if (!state) {
+        fclose(file);
+        return NULL;
+    }
+    
+    // Read the entire state from file
+    if (fread(state, sizeof(GameState), 1, file) != 1) {
+        free(state);
+        fclose(file);
+        return NULL;
+    }
+    
+    fclose(file);
+    return state;
+}
+
+void list_saved_games(const char* username, char saves[][50], int* save_count) {
+    char pattern[100];
+    snprintf(pattern, sizeof(pattern), "saves/%s_*.sav", username);
+    
+    glob_t glob_result;
+    *save_count = 0;
+    
+    if (glob(pattern, GLOB_NOSORT, NULL, &glob_result) == 0) {
+        clear();
+        mvprintw(4, 5, "Saved Games for %s:", username);
+        mvprintw(5, 5, "-------------------------");
+        
+        for (size_t i = 0; i < glob_result.gl_pathc && i < 10; i++) {
+            FILE* file = fopen(glob_result.gl_pathv[i], "rb");
+            if (file) {
+                GameState temp_state;
+                if (fread(&temp_state, sizeof(GameState), 1, file) == 1) {
+                    // Extract save name from filename
+                    char* base = basename(glob_result.gl_pathv[i]);
+                    char* underscore = strchr(base, '_');
+                    char* dot = strrchr(base, '.');
+                    if (underscore && dot) {
+                        underscore++; // Skip the underscore
+                        size_t len = dot - underscore;
+                        strncpy(saves[*save_count], underscore, len);
+                        saves[*save_count][len] = '\0';
+                        
+                        mvprintw(7 + i, 5, "%d. %s - Level %d - Score %d - %s", 
+                                (int)i + 1,
+                                saves[*save_count],
+                                temp_state.level,
+                                temp_state.score,
+                                temp_state.timestamp);
+                        (*save_count)++;
+                    }
+                }
+                fclose(file);
+            }
+        }
+        globfree(&glob_result);
+    }
+    refresh();
+}
+
+void handle_save_game(const char* username) {
+    echo();
+    curs_set(1);
+    
+    char save_name[50];
+    mvprintw(40, 1, "Enter save name: ");
+    clrtoeol();
+    refresh();
+    getstr(save_name);
+    
+    // Create game state
+    GameState state;
+    
+    // Fill state with current game data
+    state.player = player;
+    state.player_health = player_health;
+    state.current_hunger = current_hunger;
+    state.score = score;
+    state.level = level;
+    state.game_start_time = game_start_time;
+    state.player_inventory = player_inventory;
+    state.difficulty_level = dif_lvl;
+    
+    // Copy map state
+    memcpy(state.map, map, sizeof(map));
+    memcpy(state.trap_locations, trap_locations, sizeof(trap_locations));
+    memcpy(state.revealed_traps, revealed_traps, sizeof(revealed_traps));
+    memcpy(state.gold_values, gold_values, sizeof(gold_values));
+    memcpy(state.visited_tiles, visited_tiles, sizeof(visited_tiles));
+    
+    // Copy room and enemy state
+    state.current_level = current_level;
+    state.current_enemies = current_enemies;
+    
+    // Copy effect states
+    state.speed_active = speed_active;
+    state.damage_active = damage_active;
+    state.health_active = health_active;
+    state.speed_potion_moves = speed_potion_moves;
+    state.potion_moves_left = potion_moves_left;
+    state.moves_since_potion = moves_since_potion;
+    state.health_regen_rate = health_regen_rate;
+    
+    // Copy game flags
+    state.password_shown = password_shown;
+    state.door_unlocked = door_unlocked;
+    strncpy(state.current_password, current_password, sizeof(state.current_password));
+    state.password_location = password_location;
+    state.locked_door_location = locked_door_location;
+    state.sword_collected = sword_collected;
+    state.sword_placed = sword_placed;
+    state.in_nightmare_room = in_nightmare_room;
+    
+    // Copy door state
+    state.door_count = i;  // 'i' is your global door counter
+    memcpy(state.doors, doors, sizeof(doors));
+    
+    // Copy last shot information
+    state.last_shot_dx = last_shot_dx;
+    state.last_shot_dy = last_shot_dy;
+    state.last_shot_made = last_shot_made;
+    
+    strncpy(state.save_name, save_name, sizeof(state.save_name) - 1);
+    save_game(&state, username, save_name);
+    
+    noecho();
+    curs_set(0);
+}
+
+bool handle_load_game(const char* username) {
+    char saves[10][50];
+    int save_count = 0;
+    
+    list_saved_games(username, saves, &save_count);
+
+    if (save_count == 0) {
+        mvprintw(40, 1, "No saved games found. Press any key to continue...");
+        refresh();
+        getch();
+        return false;
+    }
+    
+    mvprintw(40, 1, "Enter save number to load (or 0 to cancel): ");
+    refresh();
+    
+    echo();
+    curs_set(1);
+    
+    char input[10];
+    getstr(input);
+    int choice = atoi(input);
+    
+    if (choice > 0 && choice <= save_count) {
+        GameState* loaded_state = load_game(username, saves[choice - 1]);
+        if (loaded_state) {
+            // Restore game state
+            player = loaded_state->player;
+            player_health = loaded_state->player_health;
+            current_hunger = loaded_state->current_hunger;
+            score = loaded_state->score;
+            level = loaded_state->level;
+            game_start_time = loaded_state->game_start_time;
+            player_inventory = loaded_state->player_inventory;
+            dif_lvl = loaded_state->difficulty_level;
+            
+            // Restore map state
+            memcpy(map, loaded_state->map, sizeof(map));
+            memcpy(trap_locations, loaded_state->trap_locations, sizeof(trap_locations));
+            memcpy(revealed_traps, loaded_state->revealed_traps, sizeof(revealed_traps));
+            memcpy(gold_values, loaded_state->gold_values, sizeof(gold_values));
+            memcpy(visited_tiles, loaded_state->visited_tiles, sizeof(visited_tiles));
+            
+            // Restore room and enemy state
+            current_level = loaded_state->current_level;
+            current_enemies = loaded_state->current_enemies;
+            
+            // Restore effect states
+            speed_active = loaded_state->speed_active;
+            damage_active = loaded_state->damage_active;
+            health_active = loaded_state->health_active;
+            speed_potion_moves = loaded_state->speed_potion_moves;
+            potion_moves_left = loaded_state->potion_moves_left;
+            moves_since_potion = loaded_state->moves_since_potion;
+            health_regen_rate = loaded_state->health_regen_rate;
+            
+            // Restore game flags
+            password_shown = loaded_state->password_shown;
+            door_unlocked = loaded_state->door_unlocked;
+            strncpy(current_password, loaded_state->current_password, sizeof(current_password));
+            password_location = loaded_state->password_location;
+            locked_door_location = loaded_state->locked_door_location;
+            sword_collected = loaded_state->sword_collected;
+            sword_placed = loaded_state->sword_placed;
+            in_nightmare_room = loaded_state->in_nightmare_room;
+            
+            // Restore door state
+            i = loaded_state->door_count;
+            memcpy(doors, loaded_state->doors, sizeof(doors));
+            
+            free(loaded_state);
+            
+            noecho();
+            curs_set(0);
+            return true;
+        }
+    }
+    
+    noecho();
+    curs_set(0);
+    return false;
 }
 
 void init_weapons() {
@@ -966,27 +1419,43 @@ void init_enemy(Enemy* enemy, char type) {
     enemy->is_tracking = false;
     enemy->follow_count = 0;
     
+    // Base stats multiplier based on difficulty
+    float stat_multiplier;
+    switch(dif_lvl) {
+        case 0: // Easy
+            stat_multiplier = 1.0f;
+            break;
+        case 1: // Medium
+            stat_multiplier = 1.5f;
+            break;
+        case 2: // Hard
+            stat_multiplier = 2.0f;
+            break;
+        default:
+            stat_multiplier = 1.0f;
+    }
+    
     switch(type) {
         case ENEMY_DEMON:
-            enemy->max_health = enemy->health = 5;
-            enemy->damage = 5;
+            enemy->max_health = enemy->health = (int)(5 * stat_multiplier);
+            enemy->damage = (int)(5 * stat_multiplier);
             break;
         case ENEMY_FIRE:
-            enemy->max_health = enemy->health = 10;
-            enemy->damage = 8;
+            enemy->max_health = enemy->health = (int)(10 * stat_multiplier);
+            enemy->damage = (int)(8 * stat_multiplier);
             break;
         case ENEMY_GIANT:
-            enemy->max_health = enemy->health = 15;
-            enemy->damage = 10;
+            enemy->max_health = enemy->health = (int)(15 * stat_multiplier);
+            enemy->damage = (int)(10 * stat_multiplier);
             enemy->follow_count = 5;
             break;
         case ENEMY_SNAKE:
-            enemy->max_health = enemy->health = 20;
-            enemy->damage = 12;
+            enemy->max_health = enemy->health = (int)(20 * stat_multiplier);
+            enemy->damage = (int)(12 * stat_multiplier);
             break;
         case ENEMY_UNDEAD:
-            enemy->max_health = enemy->health = 30;
-            enemy->damage = 15;
+            enemy->max_health = enemy->health = (int)(30 * stat_multiplier);
+            enemy->damage = (int)(15 * stat_multiplier);
             enemy->follow_count = 5;
             break;
     }
@@ -1088,9 +1557,31 @@ void place_enemies_in_room(Room room) {
         return;
     }
 
+    // Set spawn rates based on difficulty
+    float spawn_rate;
+    int max_enemies_per_room;
+    
+    switch(dif_lvl) {
+        case 0: // Easy
+            spawn_rate = ENEMY_SPAWN_EASY;
+            max_enemies_per_room = MAX_ENEMIES_EASY;
+            break;
+        case 1: // Medium
+            spawn_rate = ENEMY_SPAWN_MEDIUM;
+            max_enemies_per_room = MAX_ENEMIES_MEDIUM;
+            break;
+        case 2: // Hard
+            spawn_rate = ENEMY_SPAWN_HARD;
+            max_enemies_per_room = MAX_ENEMIES_HARD;
+            break;
+        default:
+            spawn_rate = ENEMY_SPAWN_MEDIUM;
+            max_enemies_per_room = MAX_ENEMIES_MEDIUM;
+    }
+
     // Ensure spawn rate is within valid range
-    if (current_spawn_rate < 0.0f) current_spawn_rate = 0.0f;
-    if (current_spawn_rate > 1.0f) current_spawn_rate = 1.0f;
+    if (spawn_rate < 0.0f) spawn_rate = 0.0f;
+    if (spawn_rate > 1.0f) spawn_rate = 1.0f;
 
     // Calculate safe area for enemy placement
     int safe_width = room.width - 4;  // Leave 2 tiles buffer on each side
@@ -1102,15 +1593,15 @@ void place_enemies_in_room(Room room) {
     }
 
     // Check spawn chance
-    int spawn_chance = (int)(current_spawn_rate * 100.0f);
+    int spawn_chance = (int)(spawn_rate * 100.0f);
     if (spawn_chance <= 0 || (rand() % 100) >= spawn_chance) {
         return;
     }
 
-    // Calculate number of enemies based on room size and max setting
+    // Calculate number of enemies based on room size and difficulty
     int room_size_max = (safe_width * safe_height) / 16;
     if (room_size_max <= 0) room_size_max = 1;
-    if (room_size_max > enemy_spawn_level) room_size_max = enemy_spawn_level;
+    if (room_size_max > max_enemies_per_room) room_size_max = max_enemies_per_room;
 
     int num_enemies = 1 + (rand() % room_size_max);
     if (num_enemies > MAX_ENEMIES - current_enemies.count) {
@@ -1970,11 +2461,30 @@ void place_gold(Room* rooms, int room_count) {
 }
 
 void place_food(Room* rooms, int room_count) {
-    const float ROOM_CHANCE = 0.9f;  // 70% chance for a room to have food
-    const int GOLD_PER_ROOM = 4;     // Number of food
+    float spawn_rate;
+    int food_per_room;
+    
+    // Set food spawn parameters based on difficulty
+    switch(dif_lvl) {
+        case 0: // Easy
+            spawn_rate = FOOD_SPAWN_EASY;
+            food_per_room = FOOD_PER_ROOM_EASY;
+            break;
+        case 1: // Medium
+            spawn_rate = FOOD_SPAWN_MEDIUM;
+            food_per_room = FOOD_PER_ROOM_MEDIUM;
+            break;
+        case 2: // Hard
+            spawn_rate = FOOD_SPAWN_HARD;
+            food_per_room = FOOD_PER_ROOM_HARD;
+            break;
+        default:
+            spawn_rate = FOOD_SPAWN_MEDIUM;
+            food_per_room = FOOD_PER_ROOM_MEDIUM;
+    }
     
     for (int r = 0; r < room_count; r++) {
-        if ((rand() % 100) > (ROOM_CHANCE * 100)) {
+        if ((rand() % 100) > (spawn_rate * 100)) {
             continue;
         }
 
@@ -1982,7 +2492,7 @@ void place_food(Room* rooms, int room_count) {
         int food_placed = 0;
         int attempts = 0;
         
-        while (food_placed < GOLD_PER_ROOM && attempts < 20) {
+        while (food_placed < food_per_room && attempts < 20) {
             int x = room.x + 2 + (rand() % (room.width - 3));
             int y = room.y + 2 + (rand() % (room.height - 3));
             
@@ -2005,16 +2515,59 @@ void place_food(Room* rooms, int room_count) {
                 }
                 
                 if (is_suitable) {
-                    int gold_type = rand() % 100;
-                    if (gold_type < 90) {          
-                        map[y][x] = FOOD;
-                    }
-                    food_placed++;
+                    map[y][x] = FOOD;
                 }
+                    food_placed++;
             }
             attempts++;
         }
     }
+}
+
+void reset_game_state() {
+    // Reset map
+    init_map();
+    
+    // Reset visited tiles array
+    memset(visited_tiles, false, sizeof(visited_tiles));
+    
+    // Reset player state
+    player_health = MAX_HEALTH;
+    current_hunger = MAX_HUNGER;
+    
+    // Reset inventory
+    init_inventory();
+    
+    // Reset enemy state
+    current_enemies.count = 0;
+    memset(current_enemies.enemies, 0, sizeof(current_enemies.enemies));
+    
+    // Reset trap arrays
+    memset(trap_locations, 0, sizeof(trap_locations));
+    memset(revealed_traps, 0, sizeof(revealed_traps));
+    
+    // Reset door counter
+    i = 0;
+    
+    // Reset various flags
+    password_shown = false;
+    door_unlocked = false;
+    in_nightmare_room = false;
+    sword_collected = false;
+    sword_placed = false;
+    
+    // Reset potion effects
+    speed_active = false;
+    damage_active = false;
+    health_active = false;
+    speed_potion_moves = 0;
+    potion_moves_left = 0;
+    moves_since_potion = 0;
+    
+    // Reset last shot information
+    last_shot_dx = 0;
+    last_shot_dy = 0;
+    last_shot_made = false;
 }
 
 void place_golden_key(Room* rooms, int room_count) {
@@ -3387,195 +3940,9 @@ void color_settings_menu(void) {
     }
 }
 
-int main(void) {
-    initscr();
-    noecho();
-    keypad(stdscr, TRUE);
-    curs_set(0);
-
-    if (has_colors()) {
-        start_color();
-        init_pair(1, COLOR_WHITE, COLOR_BLACK);
-        init_pair(2, COLOR_BLACK, COLOR_WHITE);
-    }
-    if (has_colors()) {
-        start_color();
-        use_default_colors();
-        // Initialize the basic color pair for menu selection
-        init_pair(1, COLOR_RED, -1);
-        init_pair(2, COLOR_GREEN, -1);
-        init_pair(3, COLOR_MAGENTA, -1);
-        init_pair(4, COLOR_WHITE, -1);
-        init_pair(5, COLOR_BLUE, -1);
-        init_pair(6, COLOR_CYAN, -1);
-        init_pair(7, COLOR_YELLOW, -1);
-    }
-    draw_menu();
-
-    int ch;
-    while ((ch = getch()) != 'q') {
-        if (!is_logged_in) {
-            switch (ch) {
-                case KEY_UP:
-                    selected = (selected > 0) ? selected - 1 : 1;
-                    draw_menu();
-                    break;
-                case KEY_DOWN:
-                    selected = (selected < 1) ? selected + 1 : 0;
-                    draw_menu();
-                    break;
-                case '\n':
-                    if (selected == 0) {
-                        create_user();
-                        if (is_logged_in) {
-                            selected = 0;
-                            main_menu();
-                        } else {
-                            draw_menu();
-                        }
-                    } else if (selected == 1) {
-                        is_logged_in = login_user();
-                        if (is_logged_in) {
-                            selected = 0;
-                            main_menu();
-                        } else {
-                            draw_menu();
-                        }
-                    }
-                    break;
-            }
-        } else {
-            switch (ch) {
-                case KEY_UP:
-                    selected = (selected > 0) ? selected - 1 : 3;
-                    main_menu();
-                    break;
-                case KEY_DOWN:
-                    selected = (selected < 3) ? selected + 1 : 0;
-                    main_menu();
-                    break;
-                case '\n':
-                    if(selected == 0){ // new game
-    clear();
-    selected = 0;  // Reset selection for new menu
-    n_game();
-    bool in_new_game = true;
-    
-    while(in_new_game) {
-        int ch = getch();
-        switch (ch) {
-            case KEY_UP:
-                selected = (selected > 0) ? selected - 1 : 1;
-                n_game();
-                break;
-            case KEY_DOWN:
-                selected = (selected < 1) ? selected + 1 : 0;
-                n_game();
-                break;
-            case '\n':
-                if(selected == 0) {
-                    // Start game code here
-                    clear();
-                    mvprintw(3, 12, "Starting game...");
-                    mvprintw(9, 12, "Difficulty: %s", 
-                        dif_lvl == 0 ? "Easy" : 
-                        dif_lvl == 1 ? "Medium" : "Hard");
-                    refresh();
-                    mvprintw(5,5,"~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
-                    mvprintw(7,5,"~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
-                    mvprintw(6,4,"|");
-                    mvprintw(6,35,"|");
-                    refresh();
-                    for(int i = 5; i<35; i++){
-                    mvprintw(6,i,"#");
-                    refresh();
-                    int time = (rand()%4)*100;
-                    napms(time);
-    }
-                    switch(dif_lvl){
-                        case 0:
-                        break;
-
-                        case 1:
-                        break;
-
-                        case 2:
-                        break;
-                    }
-   
-    init_map();
-    init_inventory();
-    init_weapons();
-    init_starting_weapon();
-    memset(trap_locations, 0, sizeof(trap_locations));
-    memset(revealed_traps, 0, sizeof(revealed_traps));
-    noecho();
-    keypad(stdscr, TRUE);
-    curs_set(0);
-    
-    if (!has_colors()) {
-        endwin();
-        printf("Your terminal does not support color\n");
-        exit(1);
-    }
-    
-    start_color();
-    use_default_colors(); 
-
-
-        init_pair(1, COLOR_BLACK, COLOR_WHITE);    // For messages
-        init_pair(2, COLOR_YELLOW, -1);            // Bright player color
-        init_pair(3, COLOR_WHITE, -1);             // For regular text
-        init_pair(4, COLOR_RED, -1);               // For traps and damage messages
-        init_pair(9, COLOR_RED, -1);               // For locked door
-        init_pair(5, COLOR_YELLOW, -1);            // For treasure rooms
-        init_pair(6, COLOR_WHITE, -1);             // For regular rooms
-        init_pair(7, COLOR_MAGENTA, -1);           // For enchant rooms
-        init_pair(8, COLOR_GREEN, -1);
-        init_pair(10, COLOR_RED, -1);     // For Demon
-        init_pair(11, COLOR_YELLOW, -1);  // For Fire Monster
-        init_pair(12, COLOR_GREEN, -1);   // For Giant
-        init_pair(13, COLOR_BLUE, -1);    // For Snake
-        init_pair(14, COLOR_MAGENTA, -1); // For Undead
-    srand(time(NULL));
+void game_loop(void) {
     time_t game_start_time = time(NULL);
-
-    // Get current date and time
-    time_t now = time(NULL);
-    struct tm *tm_struct = gmtime(&now);
-    char datetime[26];
-    strftime(datetime, sizeof(datetime), "%Y-%m-%d %H:%M:%S", tm_struct);
-
-    StairInfo* prev_stair = NULL;
-    init_map();
-    memset(revealed_traps, 0, sizeof(revealed_traps));
-    
-    //location player = {0, 0}; // Initialize player position
-    player_health = MAX_HEALTH;
-    current_enemies.count = 0;
-    memset(current_enemies.enemies, 0, sizeof(current_enemies.enemies));
-    generate_rooms(prev_stair, &player);
-
-    draw_borders();
-    vision();
-    //draw_map();
-    player.x = doors[0].x;  // Set initial player position to first door
-    player.y = doors[0].y;
-    attron(COLOR_PAIR(2));
-    mvprintw(player.y, player.x, "@");
-    attroff(COLOR_PAIR(2));
-
-    int score = 0;
-    int level = 1;  // Track level number
-
-    // Display initial status
-    mvprintw(42, 1, "Date/Time (UTC): %s", datetime);
-    update_status_line(score, level, player_health, player, game_start_time);
-    refresh();
-    password_shown = false;
-    door_unlocked = false;
-    generate_password();
-    int ch;
+int ch;
     while ((ch = getch()) != 'q') {
         mvprintw(player.y, player.x, " ");
         mvprintw(40, 1, "                                      ");
@@ -3683,8 +4050,14 @@ int main(void) {
 
                 // Add this after player movement
                 if (ch == KEY_UP || ch == KEY_DOWN || ch == KEY_LEFT || ch == KEY_RIGHT) {
-                 // Decrease hunger with each move
-                    current_hunger = MAX(0, current_hunger - HUNGER_DECREASE_RATE);
+                int hunger_decrease;
+                switch(dif_lvl) {
+                case 0: hunger_decrease = HUNGER_DECREASE_EASY; break;
+                case 1: hunger_decrease = HUNGER_DECREASE_MEDIUM; break;
+                case 2: hunger_decrease = HUNGER_DECREASE_HARD; break;
+                default: hunger_decrease = HUNGER_DECREASE_MEDIUM;
+    }
+    current_hunger = MAX(0, current_hunger - hunger_decrease);
     
                 // Handle hunger effects
                 if (current_hunger >= 70) {  // When well fed
@@ -3897,6 +4270,14 @@ if (speed_active) {
 break;
 }
 
+// In your main menu or game menu
+case 'S': // Save game
+    handle_save_game(current_user);
+    break;
+case 'L': // Load game
+    handle_load_game(current_user);
+    break;
+
 case ' ':  // SPACE key for attacks
     {
         // Find equipped weapon
@@ -3981,6 +4362,899 @@ refresh();
 getch();
 // napms(2000);
 break; 
+
+case 'p': // Pause game
+case 'P':
+    pause_menu();
+    break;
+
+case 'i':  // Open/close inventory
+    display_inventory();
+    while (1) {
+        int ch = getch();
+        if (ch == 'i') {
+            break;  // Exit inventory
+        } else if (ch >= '1' && ch <= '9') {
+            use_item(ch - '1');
+            display_inventory();  // Refresh inventory display
+            refresh();
+        } else if(ch == 'd') {
+            drop_item();
+            display_inventory();
+            refresh();
+        } else if(ch == 'c') {  // Combine broken keys
+            combine_broken_keys();
+            display_inventory();
+            refresh();
+        }
+    }
+    // Redraw the game screen
+    clear();
+    draw_borders();
+    vision();
+    update_status_line(score, level, player_health, player, game_start_time);
+    break;
+
+        }
+
+        // Check for player death
+        if (player_health <= 0) {
+            clear();
+            attron(COLOR_PAIR(4) | A_BOLD);
+            mvprintw(20, MAP_WIDTH/2 - 3, "GAME OVER!");
+            attroff(COLOR_PAIR(4) | A_BOLD);
+            mvprintw(22,MAP_WIDTH/2 - 5, "YOUR SCORE:%d",score);
+            refresh();
+            napms(2000);  // Wait 2 seconds
+            getch();
+            break;  // Exit the game loop
+        }
+
+        if(map[player.y][player.x] == STAIR) {
+            mvprintw(40, 1, "Press ENTER to go to next level");
+            refresh();
+            int ch;
+            while ((ch = getch()) != '\n' && ch != 'q') {
+                // Wait for ENTER or q
+            }
+            if (ch != 'q') {
+                if(level == 5){
+            clear();
+            attron(COLOR_PAIR(2) | A_BOLD);
+            int temp = 30;
+            mvprintw(0,temp,"                                     :x$$$$$$&&&&&&&&&&&&$$$$x:                                     ");
+            mvprintw(1,temp,"                             :&&&&&$X&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&$;                              ");
+            mvprintw(2,temp,"                             $&&     ;&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&$                             ");
+            mvprintw(3,temp,"                   x&&&&&&&&&&&&     X&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&X                   ");
+            mvprintw(4,temp,"                  &&&&&&&&&&&&&&     $&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&.                 ");
+            mvprintw(5,temp,"                 x&&&        X&&;    $&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&X        &&&X                 ");
+            mvprintw(6,temp,"                 +&&&.       ;&&x    $&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&+        &&&+                 ");
+            mvprintw(7,temp,"                  &&&&        &&X    $&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&        &&&&                  ");
+            mvprintw(8,temp,"                  &&&&        &&X    $&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&        &&&&                  ");
+            mvprintw(9,temp,"                   $&&&.      &&&:   x&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&      .&&&&.                  ");
+            mvprintw(10,temp,"                    $&&&X     :&&+   .&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&:     x&&&$.                   ");
+            mvprintw(11,temp,"                     X&&&$:    &&$.   &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&    .$&&&X                     ");
+            mvprintw(12,temp,"                      .&&&&X.   &&+   &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&.   X&&&&:                      ");
+            mvprintw(13,temp,"                        ;&&&&X. x&&.   &&&&&&&&&&&&&&&&&&&&&&&&&&&&x .X&&&&;                        ");
+            mvprintw(14,temp,"                          +&&&&$+&&$   &&&&&&&&&&&&&&&&&&&&&&&&&&&&+$&&&&x                          ");
+            mvprintw(15,temp,"                            x&&&&&&&x   &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&x                            ");
+            mvprintw(16,temp,"                              :&&&&&&x  x&&&&&&&&&&&&&&&&&&&&&&&&&&&&:                              ");
+            mvprintw(17,temp,"                                 x&&&&X  $&&&&&&&&&&&&&&&&&&&&&&&&x                                 ");
+            mvprintw(18,temp,"                                    x&&X .&&&&&&&&&&&&&&&&&&&&&X                                    ");
+            mvprintw(19,temp,"                                      &&$.:&&&&&&&&&&&&&&&&&&&                                      ");
+            mvprintw(20,temp,"                                        &&::$&&&&&&&&&&&&&&&.                                       ");
+            mvprintw(21,temp,"                                         ;&&.$&&&&&&&&&&&&+                                         ");
+            mvprintw(22,temp,"                                           +&&&&&&&&&&&$x                                           ");
+            mvprintw(23,temp,"                                             +&&&&&&&&+                                             ");
+            mvprintw(24,temp,"                                            x&&&&&&&&&&X                                            ");
+            mvprintw(25,temp,"                                             X$&&&&&&$X                                             ");
+            mvprintw(26,temp,"                                                &&&&                                                ");
+            mvprintw(27,temp,"                                                &&&&                                                ");
+            mvprintw(28,temp,"                                                &&&&                                                ");
+            mvprintw(29,temp,"                                                &&&&                                                ");
+            mvprintw(30,temp,"                                               +&&&&x                                               ");
+            mvprintw(31,temp,"                                              :&&&&&&:                                              ");
+            mvprintw(32,temp,"                                             x&&&&&&&&x                                             ");
+            mvprintw(33,temp,"                                         :+$&&&&&&&&&&&&$+:                                         ");
+            mvprintw(34,temp,"                                    :&&&&&&&&&&&&&&&&&&&&&&&&&&$                                    ");
+            mvprintw(35,temp,"                                 .xx&&&&&&&&&&&&&&&&&&&&&&&&&&&&$x+                                 ");
+            mvprintw(36,temp,"                                X&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&:                               ");
+            mvprintw(37,temp,"                                &&&&&&$++++++++++++++++++++++x&&&&&&+                               ");
+            mvprintw(38,temp,"                                &&&&&$ ;                    ;. &&&&&+                               ");
+            mvprintw(39,temp,"                                &&&&&$                         &&&&&+                               ");
+            mvprintw(40,temp,"                                &&&&&$                         &&&&&+                               ");
+            mvprintw(41,temp,"                                &&&&&$                         &&&&&+                               ");
+            mvprintw(42,temp,"                                &&&&&&.                       +&&&&&+                               ");
+            mvprintw(43,temp,"                                $&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&;                               ");
+            mvprintw(44,temp,"                                 X$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$X+                                ");
+            attroff(COLOR_PAIR(2) | A_BOLD);
+            attron(COLOR_PAIR(8) | A_BOLD);
+            mvprintw(38,76, "YOU WON!");
+            attroff(COLOR_PAIR(8) | A_BOLD);
+            mvprintw(40,74, "YOUR SCORE:%d",score);
+            refresh();
+            napms(2000);  
+            getch();
+            break;  
+                }
+                else{
+                // Store current stair information before generating new level
+                StairInfo prev_level_stair;
+                prev_level_stair.stair_pos.x = player.x;
+                prev_level_stair.stair_pos.y = player.y;
+                
+                // Find the room containing the stairs
+                for (int i = 0; i < current_level.room_count; i++) {
+                    if (player.x >= current_level.rooms[i].x && 
+                        player.x <= current_level.rooms[i].x + current_level.rooms[i].width &&
+                        player.y >= current_level.rooms[i].y && 
+                        player.y <= current_level.rooms[i].y + current_level.rooms[i].height) {
+                        prev_level_stair.room = current_level.rooms[i];
+                        prev_level_stair.original_x = current_level.rooms[i].x;
+                        prev_level_stair.original_y = current_level.rooms[i].y;
+                        break;
+                    }
+                }
+
+                // Generate new level
+                clear();
+                init_map();
+                memset(trap_locations, 0, sizeof(trap_locations));
+                memset(revealed_traps, 0, sizeof(revealed_traps));
+                generate_rooms(&prev_level_stair, &player);
+                level++;
+                
+                // Place player at the stairs position
+                player.x = prev_level_stair.stair_pos.x;
+                player.y = prev_level_stair.stair_pos.y;
+                map[player.y][player.x] = FLOOR;  // Remove stair symbol at player position
+                
+                draw_borders();
+                vision();
+                //draw_map();
+                // mvprintw(42, 1, "Date/Time (UTC): %s", datetime);
+                update_status_line(score, level, player_health, player, game_start_time);
+                attron(COLOR_PAIR(2) | A_BOLD);
+                mvprintw(player.y, player.x, "@");
+                attroff(COLOR_PAIR(2) | A_BOLD);
+                refresh();
+            }
+        }
+        }
+// In your main game loop, where you update enemies:
+for (int i = 0; i < current_enemies.count && i < MAX_ENEMIES; i++) {
+    Enemy* enemy = &current_enemies.enemies[i];
+    if (!enemy || !enemy->is_active) continue;
+    
+    // Update tracking status
+    update_enemy_tracking(enemy, player.x, player.y);
+    
+    // Move enemy if tracking
+    if (enemy->is_tracking) {
+        // Check if enemy is adjacent to player
+        if (abs(enemy->x - player.x) <= 1 && abs(enemy->y - player.y) <= 1) {
+            // Attack player
+            player_health -= enemy->damage;
+            attron(COLOR_PAIR(4) | A_BOLD);
+            mvprintw(40, 1, "%c attacks you for %d damage!", enemy->type, enemy->damage);
+            attroff(COLOR_PAIR(4) | A_BOLD);
+        } else {
+            // Move enemy
+            if (move_enemy(enemy, player.x, player.y)) {
+                if (enemy->type != ENEMY_SNAKE) {
+                    enemy->follow_count--;
+                    if (enemy->follow_count <= 0) {
+                        enemy->is_tracking = false;
+                    }
+                }
+            }
+        }
+    }
+    // Add this after your movement switch statement and before enemy updates
+if (health_active && potion_moves_left > 0) {
+    if (player_health < MAX_HEALTH) {
+        int heal_amount = health_regen_rate;
+        if (player_health + heal_amount > MAX_HEALTH) {
+            heal_amount = MAX_HEALTH - player_health;
+        }
+        player_health += heal_amount;
+        mvprintw(39, 1, "Health regenerated! +%d HP (%d steps left)", 
+                 heal_amount, potion_moves_left);
+    }
+    
+    potion_moves_left--;
+    if (potion_moves_left <= 0) {
+        health_active = false;
+        health_regen_rate = 0;
+        mvprintw(40, 1, "Health regeneration effect has worn off!");
+    }
+}
+}
+        // Update status lines
+        update_status_line(score, level, player_health, player, game_start_time);
+        draw_borders();
+        vision();
+        //draw_map();
+
+        // Draw revealed traps
+        for (int y = 0; y < MAP_HEIGHT; y++) {
+            for (int x = 0; x < MAP_WIDTH; x++) {
+                if (trap_locations[y][x] && revealed_traps[y][x]) {
+                    attron(COLOR_PAIR(4));
+                    mvprintw(y, x, "%c", TRAP_VISIBLE);
+                    attroff(COLOR_PAIR(4));
+                }
+            }
+        }
+
+        // Draw player
+        attron(COLOR_PAIR(2) | A_BOLD);
+        mvprintw(player.y, player.x, "@");
+        attroff(COLOR_PAIR(2) | A_BOLD);
+
+        if (password_shown && time(NULL) - password_show_time >= 5) {
+        password_shown = false;
+        mvprintw(38, 1, "                                     ");
+}
+
+        // Refresh the static info
+        // mvprintw(42, 1, "Date/Time (UTC): %s", datetime);
+        refresh();
+    }
+    
+refresh();
+}
+
+
+
+int main(void) {
+    initscr();
+    noecho();
+    keypad(stdscr, TRUE);
+    curs_set(0);
+
+    if (has_colors()) {
+        start_color();
+        init_pair(1, COLOR_WHITE, COLOR_BLACK);
+        init_pair(2, COLOR_BLACK, COLOR_WHITE);
+    }
+    if (has_colors()) {
+        start_color();
+        use_default_colors();
+        // Initialize the basic color pair for menu selection
+        init_pair(1, COLOR_RED, -1);
+        init_pair(2, COLOR_GREEN, -1);
+        init_pair(3, COLOR_MAGENTA, -1);
+        init_pair(4, COLOR_WHITE, -1);
+        init_pair(5, COLOR_BLUE, -1);
+        init_pair(6, COLOR_CYAN, -1);
+        init_pair(7, COLOR_YELLOW, -1);
+    }
+    draw_menu();
+    
+    int ch;
+    while ((ch = getch()) != 'q') {
+        if (!is_logged_in) {
+            switch (ch) {
+                case KEY_UP:
+                    selected = (selected > 0) ? selected - 1 : 1;
+                    draw_menu();
+                    break;
+                case KEY_DOWN:
+                    selected = (selected < 1) ? selected + 1 : 0;
+                    draw_menu();
+                    break;
+                case '\n':
+                    if (selected == 0) {
+                        create_user();
+                        if (is_logged_in) {
+                            selected = 0;
+                            main_menu();
+                        } else {
+                            draw_menu();
+                        }
+                    } else if (selected == 1) {
+                        is_logged_in = login_user();
+                        if (is_logged_in) {
+                            selected = 0;
+                            main_menu();
+                        } else {
+                            draw_menu();
+                        }
+                    }
+                    break;
+            }
+        } else {
+            switch (ch) {
+                case KEY_UP:
+                    selected = (selected > 0) ? selected - 1 : 3;
+                    main_menu();
+                    break;
+                case KEY_DOWN:
+                    selected = (selected < 3) ? selected + 1 : 0;
+                    main_menu();
+                    break;
+                case '\n':
+                    if(selected == 0){ // new game
+    clear();
+    selected = 0;  // Reset selection for new menu
+    n_game();
+    bool in_new_game = true;
+    
+    while(in_new_game) {
+        int ch = getch();
+        switch (ch) {
+            case KEY_UP:
+                selected = (selected > 0) ? selected - 1 : 1;
+                n_game();
+                break;
+            case KEY_DOWN:
+                selected = (selected < 1) ? selected + 1 : 0;
+                n_game();
+                break;
+            case '\n':
+                if(selected == 0) {
+                        player.x = doors[0].x;
+                        player.y = doors[0].y;
+                        memset(visited_tiles, false, sizeof(visited_tiles));
+                    //bool visited_tiles[MAP_HEIGHT][MAP_WIDTH] = {false};
+                    // Start game code here
+                    clear();
+                    mvprintw(3, 12, "Starting game...");
+                    mvprintw(9, 12, "Difficulty: %s", 
+                        dif_lvl == 0 ? "Easy" : 
+                        dif_lvl == 1 ? "Medium" : "Hard");
+                    refresh();
+                    mvprintw(5,5,"~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+                    mvprintw(7,5,"~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+                    mvprintw(6,4,"|");
+                    mvprintw(6,35,"|");
+                    refresh();
+                    for(int i = 5; i<35; i++){
+                    mvprintw(6,i,"#");
+                    refresh();
+                    int time = (rand()%4)*100;
+                    napms(time);
+    }
+                    switch(dif_lvl){
+                        case 0:
+                        break;
+
+                        case 1:
+                        break;
+
+                        case 2:
+                        break;
+                    }
+                    reset_game_state();
+                    current_level.room_count = 0;
+                    current_enemies.count = 0;
+                    i = 0;  // Reset door counter
+                    
+                    // Clear all state variables
+                    password_shown = false;
+                    door_unlocked = false;
+                    in_nightmare_room = false;
+                    sword_collected = false;
+                    sword_placed = false;
+                    
+                    // Reset effect flags
+                    speed_active = false;
+                    damage_active = false;
+                    health_active = false;
+                    
+                    // Initialize fresh game state
+                    init_map();
+                    init_inventory();
+                    init_weapons();
+                    init_starting_weapon();
+                    memset(trap_locations, 0, sizeof(trap_locations));
+                    memset(revealed_traps, 0, sizeof(revealed_traps));
+                    memset(visited_tiles, false, sizeof(visited_tiles));
+                    //bool visited_tiles[MAP_HEIGHT][MAP_WIDTH] = {false};
+    init_map();
+    init_inventory();
+    init_weapons();
+    init_starting_weapon();
+    memset(trap_locations, 0, sizeof(trap_locations));
+    memset(revealed_traps, 0, sizeof(revealed_traps));
+    noecho();
+    keypad(stdscr, TRUE);
+    curs_set(0);
+    
+    if (!has_colors()) {
+        endwin();
+        printf("Your terminal does not support color\n");
+        exit(1);
+    }
+    
+    start_color();
+    use_default_colors(); 
+
+
+        init_pair(1, COLOR_BLACK, COLOR_WHITE);    // For messages
+        init_pair(2, COLOR_YELLOW, -1);            // Bright player color
+        init_pair(3, COLOR_WHITE, -1);             // For regular text
+        init_pair(4, COLOR_RED, -1);               // For traps and damage messages
+        init_pair(9, COLOR_RED, -1);               // For locked door
+        init_pair(5, COLOR_YELLOW, -1);            // For treasure rooms
+        init_pair(6, COLOR_WHITE, -1);             // For regular rooms
+        init_pair(7, COLOR_MAGENTA, -1);           // For enchant rooms
+        init_pair(8, COLOR_GREEN, -1);
+        init_pair(10, COLOR_RED, -1);     // For Demon
+        init_pair(11, COLOR_YELLOW, -1);  // For Fire Monster
+        init_pair(12, COLOR_GREEN, -1);   // For Giant
+        init_pair(13, COLOR_BLUE, -1);    // For Snake
+        init_pair(14, COLOR_MAGENTA, -1); // For Undead
+    srand(time(NULL));
+    time_t game_start_time = time(NULL);
+
+    // Get current date and time
+    time_t now = time(NULL);
+    struct tm *tm_struct = gmtime(&now);
+    char datetime[26];
+    strftime(datetime, sizeof(datetime), "%Y-%m-%d %H:%M:%S", tm_struct);
+
+    StairInfo* prev_stair = NULL;
+    init_map();
+    memset(revealed_traps, 0, sizeof(revealed_traps));
+    
+    //location player = {0, 0}; // Initialize player position
+    player_health = MAX_HEALTH;
+    current_enemies.count = 0;
+    memset(current_enemies.enemies, 0, sizeof(current_enemies.enemies));
+    generate_rooms(prev_stair, &player);
+
+    draw_borders();
+    vision();
+    //draw_map();
+    if(doors[0].x== locked_door_location.x && doors[0].y == locked_door_location.y){
+    player.x = doors[1].x;  // Set initial player position to first door
+    player.y = doors[1].y;   
+    }
+    else{
+    player.x = doors[0].x;  // Set initial player position to first door
+    player.y = doors[0].y;
+    }
+    attron(COLOR_PAIR(2));
+    mvprintw(player.y, player.x, "@");
+    attroff(COLOR_PAIR(2));
+
+    int score = 0;
+    int level = 1;  // Track level number
+
+    // Display initial status
+    mvprintw(42, 1, "Date/Time (UTC): %s", datetime);
+    update_status_line(score, level, player_health, player, game_start_time);
+    refresh();
+    password_shown = false;
+    door_unlocked = false;
+    generate_password();
+    int ch;
+    while ((ch = getch()) != 'q') {
+        mvprintw(player.y, player.x, " ");
+        mvprintw(40, 1, "                                      ");
+
+        switch (ch) {
+            case KEY_UP:
+            case KEY_DOWN:
+            case KEY_LEFT:
+            case KEY_RIGHT:
+                {
+                    int new_x = player.x;
+                    int new_y = player.y;
+                    mvprintw(42, 40, "player position x=%d, y=%d", player.x, player.y);
+                    refresh();
+                    int pre_x = player.x;
+                    int pre_y = player.y; 
+                    switch (ch) {
+                        case KEY_UP:    new_y--; break;
+                        case KEY_DOWN:  new_y++; break;
+                        case KEY_LEFT:  new_x--; break;
+                        case KEY_RIGHT: new_x++; break;
+                    }
+                    
+                            if (new_y > 0 && new_y < MAP_HEIGHT - 1 && new_x > 0 && new_x < MAP_WIDTH - 1 &&
+            map[new_y][new_x] != VERTICAL && map[new_y][new_x] != HORIZ && 
+            map[new_y][new_x] != PILLAR) {
+
+            // Check for items and nightmare room effects
+            if (map[new_y][new_x] == GOLD_SMALL || 
+                map[new_y][new_x] == FOOD || 
+                map[new_y][new_x] == POTION_HEALTH ||
+                map[new_y][new_x] == POTION_SPEED ||
+                map[new_y][new_x] == POTION_DAMAGE) {
+                
+                // Check if in nightmare room
+                bool in_nightmare = false;
+                for (int i = 0; i < current_level.room_count; i++) {
+                    if (current_level.rooms[i].room_type == NIGHTMARE_ROOM &&
+                        new_x >= current_level.rooms[i].x && 
+                        new_x <= current_level.rooms[i].x + current_level.rooms[i].width &&
+                        new_y >= current_level.rooms[i].y && 
+                        new_y <= current_level.rooms[i].y + current_level.rooms[i].height) {
+                        in_nightmare = true;
+                        break;
+                    }
+                }
+                
+                if (in_nightmare) {
+                    // Items in nightmare room are illusions
+                    map[new_y][new_x] = FLOOR;
+                    mvprintw(40, 1, "The item dissolves... it was just an illusion!");
+                } else {
+                    // Normal item pickup logic
+                    if (map[new_y][new_x] == GOLD_SMALL) {
+                        int gold_value = gold_values[new_y][new_x];
+                        map[new_y][new_x] = FLOOR;
+                        score += gold_value;
+                        mvprintw(40, 1, "You found a coin worth %d gold!", gold_value);
+                    } else if (map[new_y][new_x] == FOOD) {
+                        pickup_food(new_x, new_y);
+                    } else if (map[new_y][new_x] == POTION_HEALTH ||
+                             map[new_y][new_x] == POTION_SPEED ||
+                             map[new_y][new_x] == POTION_DAMAGE) {
+                        pickup_potion(map[new_y][new_x], new_x, new_y);
+                    }
+                }
+                }}
+
+
+                    // Check if move is valid
+                    if (new_y > 0 && new_y < MAP_HEIGHT - 1 && new_x > 0 && new_x < MAP_WIDTH - 1 &&
+                        map[new_y][new_x] != VERTICAL && map[new_y][new_x] != HORIZ && 
+                        map[new_y][new_x] != PILLAR &&
+                        (map[new_y][new_x] == FLOOR || map[new_y][new_x] == DOOR ||
+                         map[new_y][new_x] == '#' || map[new_y][new_x] == GOLD_SMALL ||
+                         map[new_y][new_x] == GOLD_MEDIUM || map[new_y][new_x] == GOLD_LARGE ||
+                         map[new_y][new_x] == STAIR || map[new_y][new_x] == TRAP_HIDDEN ||map[new_y][new_x] == FOOD||
+                         map[new_y][new_x] == SWORD_SYMBOL ||    // Add these lines
+                         map[new_y][new_x] == DAGGER_SYMBOL ||
+                         map[new_y][new_x] == MAGIC_WAND_SYMBOL ||
+                         map[new_y][new_x] == ARROW_SYMBOL ||
+                         map[new_y][new_x] == PASSWORD_SYMBOL ||
+                         map[new_y][new_x] == LOCKED_DOOR ||
+                         map[new_y][new_x] == GOLDEN_KEY||
+                         map[new_y][new_x] == BROKEN_KEY ||
+                         map[new_y][new_x] == ENEMY_DEMON ||
+                         map[new_y][new_x] == ENEMY_FIRE ||
+                         map[new_y][new_x] == ENEMY_GIANT ||
+                         map[new_y][new_x] == ENEMY_SNAKE ||
+                         map[new_y][new_x] == ENEMY_UNDEAD ||
+                         map[new_y][new_x] == POTION_HEALTH || 
+                         map[new_y][new_x] == POTION_SPEED ||
+                         map[new_y][new_x] == POTION_DAMAGE
+                         )) {
+                        
+                        // Clear old position
+                        mvprintw(player.y, player.x, " ");
+                        
+                    
+                       if (map[new_y][new_x] == POTION_HEALTH ||
+                       map[new_y][new_x] == POTION_SPEED ||
+                       map[new_y][new_x] == POTION_DAMAGE) {
+                        pickup_potion(map[new_y][new_x], new_x, new_y);
+                }   
+
+                // Add this after player movement
+                if (ch == KEY_UP || ch == KEY_DOWN || ch == KEY_LEFT || ch == KEY_RIGHT) {
+                int hunger_decrease;
+                switch(dif_lvl) {
+                case 0: hunger_decrease = HUNGER_DECREASE_EASY; break;
+                case 1: hunger_decrease = HUNGER_DECREASE_MEDIUM; break;
+                case 2: hunger_decrease = HUNGER_DECREASE_HARD; break;
+                default: hunger_decrease = HUNGER_DECREASE_MEDIUM;
+    }
+    current_hunger = MAX(0, current_hunger - hunger_decrease);
+    
+                // Handle hunger effects
+                if (current_hunger >= 70) {  // When well fed
+                if (player_health < MAX_HEALTH) {
+                player_health = MIN(player_health + HUNGER_HEALTH_REGEN, MAX_HEALTH);
+                mvprintw(38, 1, "You feel well fed. Health regenerated!");
+        }
+    } 
+    else if (current_hunger <= 0) {  // When starving
+        player_health -= HUNGER_HEALTH_DAMAGE;
+        mvprintw(38, 1, "You are starving! Lost %d health!", HUNGER_HEALTH_DAMAGE);
+    }
+}
+
+                        // Update player position
+                        player.x = new_x;
+                        player.y = new_y;
+                        
+                        // Inside your movement case block, after checking for valid move:
+                        if (new_x == password_location.x && new_y == password_location.y && !password_shown) {
+                        password_shown = true;
+                        password_show_time = time(NULL);
+                        attron(COLOR_PAIR(2) | A_BOLD);
+                        mvprintw(38, 2, "Password: %s", current_password);
+                        attroff(COLOR_PAIR(2) | A_BOLD);
+                        }                    
+if (new_x == locked_door_location.x && new_y == locked_door_location.y && !door_unlocked) {
+    // Check for golden key first
+    bool has_key = false;
+    for (int i = 0; i < player_inventory.count; i++) {
+        if (player_inventory.items[i].symbol == GOLDEN_KEY && !player_inventory.items[i].isBroken) {
+            has_key = true;
+            if (try_use_golden_key()) {
+                door_unlocked = true;
+                player_inventory.items[i].isBroken = true;
+                map[locked_door_location.y][locked_door_location.x] = DOOR;
+                mvprintw(40, 1, "Unlocked door with Golden Key!");
+                refresh();
+                break;
+            }
+        }
+    }
+    if(!has_key){
+    // Clear any existing messages
+    move(38, 1);
+    clrtoeol();
+    move(40, 1);
+    clrtoeol();
+    
+    char input_password[5];
+    echo(); // Enable input echo
+    mvprintw(38, 1, "Enter password: ");
+    refresh();
+    getnstr(input_password, 4);
+    noecho(); // Disable input echo
+    input_password[4] = '\0'; // Ensure null termination
+
+    if (strcmp(input_password, current_password) == 0) {
+        move(38, 1);
+        clrtoeol();
+        mvprintw(40, 1, "Door unlocked!");
+        refresh();
+        door_unlocked = true;
+        map[locked_door_location.y][locked_door_location.x] = DOOR;
+        // Allow movement to new position
+        player.x = new_x;
+        player.y = new_y;
+    } else {
+        move(38, 1);
+        clrtoeol();
+        mvprintw(40, 1, "Wrong password!");
+        player.x = pre_x;
+        player.y = pre_y;
+        refresh();
+        // Do not update player position at all - they stay at their current position
+        new_x = player.x;  // Reset the new position to current position
+        new_y = player.y;
+        
+        // Redraw player at current position
+        attron(COLOR_PAIR(2) | A_BOLD);
+        mvprintw(player.y, player.x, "@");
+        attroff(COLOR_PAIR(2) | A_BOLD);
+    }
+    
+    // Wait a moment to show the message
+    refresh();
+    napms(1000); // Wait 1 second
+    
+    // Clear the messages
+    move(38, 1);
+    clrtoeol();
+    move(40, 1);
+    clrtoeol();
+    
+    refresh();
+}
+}
+
+                        // Check for trap
+                        if (trap_locations[player.y][player.x] && !revealed_traps[player.y][player.x]) {
+                            player_health -= TRAP_DAMAGE;
+                            revealed_traps[player.y][player.x] = 1;
+                            map[player.y][player.x] = TRAP_VISIBLE;
+                            
+                            attron(COLOR_PAIR(4) | A_BOLD);
+                            mvprintw(40, 1, "You stepped on a trap! -%d HP", TRAP_DAMAGE);
+                            attroff(COLOR_PAIR(4) | A_BOLD);
+                        }
+                        // Check for gold collection
+                        else if (map[player.y][player.x] == GOLD_SMALL) {
+                        int gold_value = gold_values[player.y][player.x];
+                        map[player.y][player.x] = FLOOR;
+                        score += gold_value;
+                        mvprintw(40, 1, "You found a coin worth %d gold!", gold_value);
+}
+
+                        //check for food
+                        
+else if (map[player.y][player.x] == FOOD) {
+    pickup_food(player.x, player.y);
+}
+
+else if (map[player.y][player.x] == GOLDEN_KEY) {
+    if (player_inventory.count < MAX_INVENTORY) {
+        map[player.y][player.x] = FLOOR;
+        Item* new_key = &player_inventory.items[player_inventory.count];
+        new_key->symbol = GOLDEN_KEY;
+        new_key->name = "Golden Key";
+        new_key->isWeapon = false;
+        new_key->isKey = true;
+        new_key->isBroken = false;
+        player_inventory.count++;
+        mvprintw(40, 1, "Picked up a Golden Key!");
+    } else {
+        mvprintw(40, 1, "Inventory full! Cannot pick up Golden Key!");
+    }
+}
+
+else if (map[player.y][player.x] == SWORD_SYMBOL ||
+         map[player.y][player.x] == DAGGER_SYMBOL ||
+         map[player.y][player.x] == MAGIC_WAND_SYMBOL ||
+         map[player.y][player.x] == ARROW_SYMBOL) {
+    // Clear any previous messages
+    for(int i = 37; i <= 40; i++) {
+        move(i, 1);
+        clrtoeol();
+    }
+    pickup_weapon(map[player.y][player.x], player.x, player.y);
+    refresh();
+}
+if (speed_active) {
+    speed_potion_moves--;
+    if (speed_potion_moves <= 0) {
+        speed_active = false;
+        mvprintw(40, 1, "Speed potion effect has worn off!");
+        refresh();
+    } else {
+        mvprintw(40, 1, "Speed boost active! (%d moves left) Press arrow key for second move...", 
+                 speed_potion_moves);
+        refresh();
+        int second_move = getch();
+        if (second_move == KEY_UP || second_move == KEY_DOWN ||
+            second_move == KEY_LEFT || second_move == KEY_RIGHT) {
+            int new_x = player.x;
+            int new_y = player.y;
+            
+            switch (second_move) {
+                case KEY_UP:    new_y--; break;
+                case KEY_DOWN:  new_y++; break;
+                case KEY_LEFT:  new_x--; break;
+                case KEY_RIGHT: new_x++; break;
+            }
+            
+            // Check if second move is valid
+            if (new_y > 0 && new_y < MAP_HEIGHT - 1 && new_x > 0 && new_x < MAP_WIDTH - 1 &&
+                map[new_y][new_x] != VERTICAL && map[new_y][new_x] != HORIZ && 
+                map[new_y][new_x] != PILLAR &&
+                (map[new_y][new_x] == FLOOR || map[new_y][new_x] == DOOR ||
+                 map[new_y][new_x] == '#' || map[new_y][new_x] == GOLD_SMALL ||
+                 // ... add all valid movement tiles here
+                 map[new_y][new_x] == POTION_DAMAGE)) {
+                
+                // Clear old position
+                mvprintw(player.y, player.x, " ");
+                
+                // Update player position
+                player.x = new_x;
+                player.y = new_y;
+                
+                // Handle item pickups and interactions for second move
+                // (Copy the same item pickup logic from your first move)
+            }
+        }
+        move(40, 1);
+        clrtoeol();  // Clear the speed boost message
+    }
+}
+    if (damage_active) {
+    moves_since_potion++;
+    if (moves_since_potion >= POTION_DURATION) {
+        damage_active = false;
+        mvprintw(40, 1, "Damage potion effect has worn off!");
+        refresh();
+    } else {
+        mvprintw(39, 1, "Damage boost active! (%d moves left)", 
+                 POTION_DURATION - moves_since_potion);
+    }
+}
+}
+break;
+}
+
+// In your main menu or game menu
+case 'S': // Save game
+    handle_save_game(current_user);
+    break;
+case 'L': // Load game
+    handle_load_game(current_user);
+    break;
+
+case ' ':  // SPACE key for attacks
+    {
+        // Find equipped weapon
+        Item* equipped_weapon = NULL;
+        for(int i = 0; i < player_inventory.count; i++) {
+            if(player_inventory.items[i].isEquipped && player_inventory.items[i].isWeapon) {
+                equipped_weapon = &player_inventory.items[i];
+                break;
+            }
+        }
+        
+        if(!equipped_weapon) {
+            mvprintw(40, 1, "No weapon equipped!");
+            refresh();
+            break;
+        }
+
+        // For melee weapons (sword and mace)
+        if(equipped_weapon->symbol == 'M' || equipped_weapon->symbol == 'I') {
+            attack_with_weapon((location){player.x, player.y}, 
+                             equipped_weapon->symbol, 0, 0);
+        } else {
+            // For ranged weapons
+            mvprintw(40, 1, "Choose direction (arrow keys)");
+            refresh();
+            int dir = getch();
+            int dx = 0, dy = 0;
+            
+            switch(dir) {
+                case KEY_UP:    dy = -1; break;
+                case KEY_DOWN:  dy = 1;  break;
+                case KEY_LEFT:  dx = -1; break;
+                case KEY_RIGHT: dx = 1;  break;
+                default: 
+                    mvprintw(40, 1, "Invalid direction!");
+                    refresh();
+                    break;
+            }
+            
+            if(dx != 0 || dy != 0) {
+                throw_weapon((location){player.x, player.y}, dx, dy, 
+                           equipped_weapon->throw_range, 
+                           equipped_weapon->damage, 
+                           equipped_weapon->symbol == 'D');  // Only daggers drop
+            }
+        }
+    }
+    break;
+
+case 'a': // Repeat last shot
+    if(last_shot_made) {
+        Item* equipped_weapon = NULL;
+        for(int i = 0; i < player_inventory.count; i++) {
+            if(player_inventory.items[i].isEquipped && player_inventory.items[i].isWeapon) {
+                equipped_weapon = &player_inventory.items[i];
+                break;
+            }
+        }
+        
+        if(!equipped_weapon || equipped_weapon->count <= 0) {
+            mvprintw(40, 1, "Cannot repeat shot - no ammo!");
+            break;
+        }
+        
+        if(equipped_weapon->symbol == 'M' || equipped_weapon->symbol == 'I') {
+            attack_with_weapon((location){player.x, player.y}, 
+                             equipped_weapon->symbol, 0, 0);
+        } else {
+            throw_weapon((location){player.x, player.y}, last_shot_dx, last_shot_dy,
+                        equipped_weapon->throw_range, 
+                        equipped_weapon->damage, true);
+        }
+    }
+break;
+
+case 'm':
+clear();
+draw_map();
+update_status_line(score, level, player_health, player, game_start_time);
+draw_borders();
+refresh();   
+getch();
+// napms(2000);
+break; 
+
+case 'p': // Pause game
+case 'P':
+    pause_menu();
+    break;
 
 case 'i':  // Open/close inventory
     display_inventory();
@@ -4216,7 +5490,7 @@ if (health_active && potion_moves_left > 0) {
         refresh();
     }
     
-
+refresh();
 }
 
                      else if(selected == 1) {
@@ -4237,9 +5511,25 @@ if (health_active && potion_moves_left > 0) {
     }
                     
                     }
-                    else if(selected == 1){
-                        //load game
-                    }
+
+
+
+else if(selected == 1) { //load game
+    clear();
+    if (handle_load_game(current_user)) {
+        // Successfully loaded game
+        clear();
+        draw_borders();
+        vision();
+        update_status_line(score, level, player_health, player, game_start_time);
+        refresh();
+        game_loop();  // Start the game with loaded state
+    } else {
+        // Load failed or was cancelled
+        clear();
+        main_menu();
+    }
+}
                     else if(selected == 2){ //profile
                         clear();
                         

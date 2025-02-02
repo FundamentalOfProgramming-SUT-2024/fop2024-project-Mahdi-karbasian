@@ -2322,40 +2322,46 @@ void throw_weapon(location start, int dx, int dy, int max_range, int damage, boo
     }
     
     if (!equipped_weapon) {
-        mvprintw(40, 1, "No weapon equipped!");
+        mvprintw(40, 2, "No weapon equipped!");
         refresh();
         return;
     }
 
     // Check if we have enough ammo
     if (equipped_weapon->count <= 0) {
-        mvprintw(40, 1, "Out of ammo!");
+        mvprintw(40, 2, "Out of ammo!");
         refresh();
         return;
     }
 
     char weapon_symbol = equipped_weapon->symbol;
     
-    // Debug message
-    mvprintw(36, 1, "Throwing %c (%d/%d remaining)", 
-             weapon_symbol, equipped_weapon->count, equipped_weapon->max_stack);
+    // Store original map state
+    char original_chars[MAP_HEIGHT][MAP_WIDTH];
+    memcpy(original_chars, map, sizeof(map));
     
     // Decrease weapon count BEFORE throwing
     equipped_weapon->count--;
-    
-    // Store original map
-    char original_chars[MAP_HEIGHT][MAP_WIDTH];
-    memcpy(original_chars, map, sizeof(map));
     
     while (distance < max_range && !hit_something) {
         current_x += dx;
         current_y += dy;
         distance++;
         
+        // Check boundaries
+        if (current_x <= 1 || current_x >= MAP_WIDTH - 2 || 
+            current_y <= 1 || current_y >= MAP_HEIGHT - 2) {
+            // Back up one step since we hit a boundary
+            current_x -= dx;
+            current_y -= dy;
+            hit_something = true;
+            break;
+        }
+
         // Show animation
         if (map[current_y][current_x] == FLOOR || map[current_y][current_x] == '#') {
             attron(COLOR_PAIR(2) | A_BOLD);
-            mvaddch(current_y, current_x, weapon_symbol);
+            mvaddch(current_y, current_x,weapon_symbol);
             attroff(COLOR_PAIR(2) | A_BOLD);
             refresh();
             napms(50);
@@ -2363,31 +2369,13 @@ void throw_weapon(location start, int dx, int dy, int max_range, int damage, boo
             refresh();
         }
 
-        // Check boundaries
-        if (current_x <= 1 || current_x >= MAP_WIDTH - 2 || 
-            current_y <= 1 || current_y >= MAP_HEIGHT - 2) {
-            if (drops_after_hit) {
-                int drop_x = current_x - dx;
-                int drop_y = current_y - dy;
-                if (map[drop_y][drop_x] == FLOOR || map[drop_y][drop_x] == '#') {
-                    map[drop_y][drop_x] = weapon_symbol;
-                }
-            }
-            hit_something = true;
-            break;
-        }
-
         // Check for enemy hit
         if (map[current_y][current_x] >= ENEMY_DEMON && 
             map[current_y][current_x] <= ENEMY_UNDEAD) {
             damage_enemy(current_x, current_y, damage * (damage_active ? 2 : 1));
-            if (drops_after_hit) {
-                int drop_x = current_x - dx;
-                int drop_y = current_y - dy;
-                if (map[drop_y][drop_x] == FLOOR || map[drop_y][drop_x] == '#') {
-                    map[drop_y][drop_x] = weapon_symbol;
-                }
-            }
+            // Back up one step for dropping the weapon
+            //current_x -= dx;
+            //current_y -= dy;
             hit_something = true;
             break;
         }
@@ -2397,44 +2385,41 @@ void throw_weapon(location start, int dx, int dy, int max_range, int damage, boo
             map[current_y][current_x] == HORIZ || 
             map[current_y][current_x] == PILLAR ||
             map[current_y][current_x] == DOOR) {
-            if (drops_after_hit) {
-                int drop_x = current_x - dx;
-                int drop_y = current_y - dy;
-                if (map[drop_y][drop_x] == FLOOR || map[drop_y][drop_x] == '#') {
-                    map[drop_y][drop_x] = weapon_symbol;
-                }
-            }
+            // Back up one step since we hit an obstacle
+            current_x -= dx;
+            current_y -= dy;
+            //map[current_y][current_x] = weapon_symbol;
+            drops_after_hit = true;
             hit_something = true;
             break;
         }
+        if (distance == max_range-1){
+            drops_after_hit = true;
+        }
     }
     
-    // Handle max range
-    if (!hit_something && drops_after_hit) {
+    // Handle weapon dropping
+    if (drops_after_hit) {
         if (map[current_y][current_x] == FLOOR || map[current_y][current_x] == '#') {
             map[current_y][current_x] = weapon_symbol;
+            mvprintw(37, 1, "Weapon dropped at position %d,%d", current_x, current_y);
         }
     }
     
     // Update inventory display
-    mvprintw(37, 1, "Weapon count now: %d/%d", 
+    mvprintw(38, 2, "Weapon count now: %d/%d", 
              equipped_weapon->count, equipped_weapon->max_stack);
     
     // Remove weapon if out of ammo
     if (equipped_weapon->count <= 0) {
-        mvprintw(38, 1, "Out of %s! Removing from inventory.", equipped_weapon->name);
-        // Find the weapon in inventory and remove it
-        for (int i = 0; i < player_inventory.count; i++) {
-            if (&player_inventory.items[i] == equipped_weapon) {
-                // Shift remaining items left
-                for (int j = i; j < player_inventory.count - 1; j++) {
-                    player_inventory.items[j] = player_inventory.items[j + 1];
-                }
-                player_inventory.count--;
-                break;
-            }
-        }
+        mvprintw(39, 2, "Out of %s! Removing from inventory.", equipped_weapon->name);
+        remove_item_from_inventory(equipped_weapon);
     }
+    
+    // Store last shot information for repeat shots
+    last_shot_dx = dx;
+    last_shot_dy = dy;
+    last_shot_made = true;
     
     // Update display
     vision();

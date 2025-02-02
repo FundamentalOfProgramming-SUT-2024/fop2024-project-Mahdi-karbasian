@@ -57,14 +57,15 @@
 #define ENEMY_GIANT 'G'
 #define ENEMY_SNAKE 'S'
 #define ENEMY_UNDEAD 'U'
-
+#define NIGHTMARE_ROOM 5  // Add this with your other room type definitions
 // Enemy spawn rate controls
 #define SPAWN_RATE_VERY_LOW  0.2f   // 20% chance per room
 #define SPAWN_RATE_LOW       0.4f   // 40% chance per room
 #define SPAWN_RATE_NORMAL    0.7f   // 70% chance per room (original value)
 #define SPAWN_RATE_HIGH      0.85f  // 85% chance per room
 #define SPAWN_RATE_VERY_HIGH 1.0f   // 100% chance per room
-
+bool in_nightmare_room = false;
+#define NIGHTMARE_VISION 2  // 2 blocks in each direction
 #define MAX_HUNGER 100
 #define HUNGER_DECREASE_RATE 1    // How much hunger decreases per move
 #define HUNGER_HEALTH_REGEN 2     // Health regenerated when full
@@ -1432,16 +1433,19 @@ void draw_room(Room room) {
     int color_pair;
     switch(room.room_type) {
         case 1: // Treasure room
-            color_pair = 5;
+            color_pair = 5; // COLOR_YELLOW
             break;
         case 2: // Enchant room
-            color_pair = 7;
+            color_pair = 7; // COLOR_MAGENTA
+            break;
+        case NIGHTMARE_ROOM: // Nightmare room
+            color_pair = 4; // COLOR_RED
             break;
         case SECRET_ROOM_TYPE: // Secret room
-            color_pair = 8;  // Use a different color for secret rooms
+            color_pair = 8;  // COLOR_GREEN
             break;
         default: // Regular room
-            color_pair = 6;
+            color_pair = 6; // COLOR_WHITE
             break;
     }
     
@@ -1464,8 +1468,75 @@ void draw_room(Room room) {
         map[y][room.x] = VERTICAL;
         map[y][room.x + room.width] = VERTICAL;
     }
+
+    // Special handling for Nightmare Room
+    if (room.room_type == NIGHTMARE_ROOM) {
+        // Add illusory items
+        int num_illusions = (room.width * room.height) / 10; // 10% of room space
+        for (int i = 0; i < num_illusions; i++) {
+            int x = room.x + 1 + (rand() % (room.width - 2));
+            int y = room.y + 1 + (rand() % (room.height - 2));
+            
+            if (map[y][x] == FLOOR) { // Only place on empty floor
+                switch(rand() % 3) {
+                    case 0:
+                        map[y][x] = GOLD_SMALL; // Illusory gold
+                        break;
+                    case 1:
+                        map[y][x] = FOOD; // Illusory food
+                        break;
+                    case 2:
+                        map[y][x] = POTION_HEALTH; // Illusory potion
+                        break;
+                }
+            }
+        }
+
+        // Add some visual indicators that this is a nightmare room
+        // Add some skull-like patterns or other scary symbols in the corners
+        if (room.width >= 5 && room.height >= 5) {
+            // Top left corner pattern
+            map[room.y + 1][room.x + 1] = 'X';
+            // Top right corner pattern
+            map[room.y + 1][room.x + room.width - 1] = 'X';
+            // Bottom left corner pattern
+            map[room.y + room.height - 1][room.x + 1] = 'X';
+            // Bottom right corner pattern
+            map[room.y + room.height - 1][room.x + room.width - 1] = 'X';
+        }
+
+        // Add the current UTC time and username as a "signature" of the nightmare
+        char datetime[20];
+        time_t now = time(NULL);
+        struct tm *tm_info = gmtime(&now);
+        strftime(datetime, 20, "%Y-%m-%d %H:%M:%S", tm_info);
+        
+        // Only add if room is large enough
+        if (room.width >= 15 && room.height >= 3) {
+            int center_x = room.x + (room.width / 2);
+            int center_y = room.y + (room.height / 2);
+            
+            // Draw a simple marker at the center
+            map[center_y][center_x] = '+';
+        }
+    }
     
     attroff(COLOR_PAIR(color_pair));
+
+    // If this is the first room (spawn room), mark it as visited
+    if (room.x == current_level.rooms[0].x && 
+        room.y == current_level.rooms[0].y) {
+        room.visited = true;
+    }
+
+    // Update the room in the current_level array
+    for (int i = 0; i < current_level.room_count; i++) {
+        if (current_level.rooms[i].x == room.x && 
+            current_level.rooms[i].y == room.y) {
+            current_level.rooms[i] = room;
+            break;
+        }
+    }
 }
 
 Room find_furthest_room(Room* rooms, int room_count, location start_pos) {
@@ -1949,6 +2020,19 @@ void combine_broken_keys(void) {
 }
 
 void vision(void) {
+    // Check if player is in a nightmare room
+    in_nightmare_room = false;
+    for (int i = 0; i < current_level.room_count; i++) {
+        if (current_level.rooms[i].room_type == NIGHTMARE_ROOM &&
+            player.x >= current_level.rooms[i].x && 
+            player.x <= current_level.rooms[i].x + current_level.rooms[i].width &&
+            player.y >= current_level.rooms[i].y && 
+            player.y <= current_level.rooms[i].y + current_level.rooms[i].height) {
+            in_nightmare_room = true;
+            break;
+        }
+    }
+
     // Save any messages from lines 37-42 before clearing
     char messages[6][MAP_WIDTH];
     for(int i = 37; i <= 42; i++) {
@@ -1957,8 +2041,8 @@ void vision(void) {
     
     clear();
     
-    // Define vision radius
-    const int VISION_RADIUS = 5;
+    // Define vision radius based on room type
+    const int VISION_RADIUS = in_nightmare_room ? NIGHTMARE_VISION : 5;
     
     // Mark current visible tiles as visited
     for(int dy = -VISION_RADIUS; dy <= VISION_RADIUS; dy++) {
@@ -1966,8 +2050,11 @@ void vision(void) {
             int new_y = player.y + dy;
             int new_x = player.x + dx;
             
+            // Only mark as visited if within nightmare vision limits
             if(new_x >= 0 && new_x < MAP_WIDTH && new_y >= 0 && new_y < MAP_HEIGHT) {
-                visited_tiles[new_y][new_x] = true;
+                if (!in_nightmare_room || (abs(dx) <= NIGHTMARE_VISION && abs(dy) <= NIGHTMARE_VISION)) {
+                    visited_tiles[new_y][new_x] = true;
+                }
             }
         }
     }
@@ -1996,6 +2083,8 @@ void vision(void) {
                     switch(room_type) {
                         case 1: color_pair = 5; break; // Treasure room
                         case 2: color_pair = 7; break; // Enchant room
+                        case NIGHTMARE_ROOM: color_pair = 4; break; // Nightmare room
+                        case SECRET_ROOM_TYPE: color_pair = 8; break; // Secret room
                         default: color_pair = 6; break; // Regular room
                     }
                 } else {
@@ -2024,6 +2113,13 @@ void vision(void) {
     // Draw current vision area with brighter colors
     for(int y = start_y; y <= end_y; y++) {
         for(int x = start_x; x <= end_x; x++) {
+            // Skip tiles outside nightmare room vision in nightmare room
+            if (in_nightmare_room && 
+                (abs(x - player.x) > NIGHTMARE_VISION || 
+                 abs(y - player.y) > NIGHTMARE_VISION)) {
+                continue;
+            }
+
             if (map[y][x] >= ENEMY_DEMON && map[y][x] <= ENEMY_UNDEAD) {
                 switch(map[y][x]) {
                     case ENEMY_DEMON:  attron(COLOR_PAIR(10)); break;
@@ -2055,6 +2151,7 @@ void vision(void) {
                     switch(room_type) {
                         case 1: color_pair = 5; break;
                         case 2: color_pair = 7; break;
+                        case NIGHTMARE_ROOM: color_pair = 4; break;
                         default: color_pair = 6; break;
                     }
                 } else {
@@ -2080,6 +2177,22 @@ void vision(void) {
     for(int i = 37; i <= 42; i++) {
         mvprintw(i, 0, "%s", messages[i-37]);
     }
+
+    // Add nightmare room warning if in nightmare room
+    if (in_nightmare_room) {
+        attron(COLOR_PAIR(4) | A_BOLD);
+        mvprintw(36, 1, "WARNING: You are in a Nightmare Room! Vision limited to 2 blocks!");
+        mvprintw(37, 1, "Items here are illusions and will disappear when touched!");
+        attroff(COLOR_PAIR(4) | A_BOLD);
+    }
+    
+    // Display current UTC time and user info
+    char current_time[26];
+    time_t now = time(NULL);
+    struct tm *tm_info = gmtime(&now);
+    strftime(current_time, sizeof(current_time), "%Y-%m-%d %H:%M:%S", tm_info);
+    mvprintw(43, 1, "Current Time (UTC): %s", current_time);
+    mvprintw(44, 1, "User: mahdi866");
     
     refresh();
 }
@@ -2132,8 +2245,11 @@ void generate_rooms(StairInfo* prev_stair, location* player_pos) {
             else if(num < 80)
             new_room.room_type = 1;
 
-            else
+            else if(num < 90)
             new_room.room_type = 2;
+
+            else if (num < 100)
+            new_room.room_type = NIGHTMARE_ROOM;
 
             current_level.rooms[current_level.room_count] = new_room;
             draw_room(new_room);
@@ -2324,6 +2440,9 @@ void update_status_line(int score, int level, int player_health, location player
             break;
         case 3:
             room_name = "Regular Room";
+            break;
+        case NIGHTMARE_ROOM:
+            room_name = "Nightmare Room";
             break;
         default:
             room_name = "Corridor";
@@ -2706,6 +2825,52 @@ int main() {
                         case KEY_RIGHT: new_x++; break;
                     }
                     
+                            if (new_y > 0 && new_y < MAP_HEIGHT - 1 && new_x > 0 && new_x < MAP_WIDTH - 1 &&
+            map[new_y][new_x] != VERTICAL && map[new_y][new_x] != HORIZ && 
+            map[new_y][new_x] != PILLAR) {
+
+            // Check for items and nightmare room effects
+            if (map[new_y][new_x] == GOLD_SMALL || 
+                map[new_y][new_x] == FOOD || 
+                map[new_y][new_x] == POTION_HEALTH ||
+                map[new_y][new_x] == POTION_SPEED ||
+                map[new_y][new_x] == POTION_DAMAGE) {
+                
+                // Check if in nightmare room
+                bool in_nightmare = false;
+                for (int i = 0; i < current_level.room_count; i++) {
+                    if (current_level.rooms[i].room_type == NIGHTMARE_ROOM &&
+                        new_x >= current_level.rooms[i].x && 
+                        new_x <= current_level.rooms[i].x + current_level.rooms[i].width &&
+                        new_y >= current_level.rooms[i].y && 
+                        new_y <= current_level.rooms[i].y + current_level.rooms[i].height) {
+                        in_nightmare = true;
+                        break;
+                    }
+                }
+                
+                if (in_nightmare) {
+                    // Items in nightmare room are illusions
+                    map[new_y][new_x] = FLOOR;
+                    mvprintw(40, 1, "The item dissolves... it was just an illusion!");
+                } else {
+                    // Normal item pickup logic
+                    if (map[new_y][new_x] == GOLD_SMALL) {
+                        int gold_value = gold_values[new_y][new_x];
+                        map[new_y][new_x] = FLOOR;
+                        score += gold_value;
+                        mvprintw(40, 1, "You found a coin worth %d gold!", gold_value);
+                    } else if (map[new_y][new_x] == FOOD) {
+                        pickup_food(new_x, new_y);
+                    } else if (map[new_y][new_x] == POTION_HEALTH ||
+                             map[new_y][new_x] == POTION_SPEED ||
+                             map[new_y][new_x] == POTION_DAMAGE) {
+                        pickup_potion(map[new_y][new_x], new_x, new_y);
+                    }
+                }
+                }}
+
+
                     // Check if move is valid
                     if (new_y > 0 && new_y < MAP_HEIGHT - 1 && new_x > 0 && new_x < MAP_WIDTH - 1 &&
                         map[new_y][new_x] != VERTICAL && map[new_y][new_x] != HORIZ && 
@@ -2735,6 +2900,7 @@ int main() {
                         // Clear old position
                         mvprintw(player.y, player.x, " ");
                         
+                    
                        if (map[new_y][new_x] == POTION_HEALTH ||
                        map[new_y][new_x] == POTION_SPEED ||
                        map[new_y][new_x] == POTION_DAMAGE) {

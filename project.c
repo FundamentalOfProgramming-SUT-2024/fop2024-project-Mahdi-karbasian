@@ -176,7 +176,7 @@ typedef enum {
 
 typedef struct {
     char symbol;
-    char* name;
+    char name[50];
     int heal_value;    // For food
     int damage;        // For weapons
     bool isEquipped;
@@ -891,31 +891,31 @@ bool handle_load_game(const char* username) {
 }
 
 void init_weapons() {
-    mace.name = strdup("MACE");
+    strncpy(mace.name, "MACE", sizeof(mace.name) - 1);
     mace.damage = 5;
     mace.isEquipped = true;
     mace.symbol = 'M';
     mace.max_stack = 1;
 
-    dagger.name = strdup("DAGGER");
+    strncpy(mace.name, "DAGGER", sizeof(dagger.name) - 1);
     dagger.damage = 12;
     dagger.symbol = 'd';
     dagger.isEquipped = false;
     dagger.max_stack = 10;  // Can carry up to 10 daggers
 
-    Magic_wand.name = strdup("MAGIC WAND");
+    strncpy(mace.name, "MAGIC WAND", sizeof(Magic_wand.name) - 1);
     Magic_wand.damage = 15;
     Magic_wand.symbol = '%';
     Magic_wand.isEquipped = false;
     Magic_wand.max_stack = 8;  // Can carry up to 8 wands
 
-    arrow.name = strdup("ARROW");
+    strncpy(mace.name, "ARROW", sizeof(arrow.name) - 1);
     arrow.damage = 5;
     arrow.max_stack = 20;  // Can carry up to 20 arrows
     arrow.symbol = 'V';
     arrow.isEquipped = false;
 
-    sword.name = strdup("SWORD");
+    strncpy(mace.name, "SWORD", sizeof(sword.name) - 1);
     sword.damage = 10;
     sword.isEquipped = false;
     sword.max_stack = 1;  // Can only carry 1 sword
@@ -926,7 +926,7 @@ void init_starting_weapon() {
     // Add mace to starting inventory
     if (player_inventory.count < MAX_INVENTORY) {
         player_inventory.items[player_inventory.count].symbol = 'M';
-        player_inventory.items[player_inventory.count].name = "MACE";
+        strncpy(player_inventory.items[player_inventory.count].name, "MACE", sizeof(player_inventory.items[player_inventory.count].name) - 1);
         player_inventory.items[player_inventory.count].damage = mace.damage;
         player_inventory.items[player_inventory.count].isEquipped = true;
         player_inventory.items[player_inventory.count].isWeapon = true;
@@ -990,7 +990,7 @@ void pickup_food(int x, int y) {
 
     Item* new_item = &player_inventory.items[player_inventory.count];
     new_item->symbol = FOOD;
-    new_item->name = "Food Ration";
+    strncpy(new_item->name, "FOOD", sizeof(new_item->name) - 1);
     new_item->isWeapon = false;
     new_item->isPotion = false;
     new_item->isKey = false;
@@ -1023,19 +1023,19 @@ void pickup_potion(char potion_type, int x, int y) {
     
     switch(potion_type) {
         case POTION_HEALTH:
-            new_item->name = "Health Potion";
+            strncpy(new_item->name, "HEALTH POTION", sizeof(new_item->name) - 1);
             new_item->heal_value = 50;  // Or whatever value you use for health potions
             break;
         case POTION_DAMAGE:
-            new_item->name = "Damage Potion";
+            strncpy(new_item->name, "DAMAGE POTION", sizeof(new_item->name) - 1);
             new_item->potion_moves_left = 10;  // Duration for damage boost
             break;
         case POTION_SPEED:
-            new_item->name = "Speed Potion";
+            strncpy(new_item->name, "SPEED POTION", sizeof(new_item->name) - 1);
             new_item->potion_moves_left = 20;  // Duration for speed boost
             break;
         default:
-            new_item->name = "Unknown Potion";
+            //new_item->name = "Unknown Potion";
             break;
     }
     
@@ -1086,35 +1086,35 @@ void pickup_weapon(char weapon_symbol, int x, int y) {
     
     switch(weapon_symbol) {
         case SWORD_SYMBOL:
-            new_item->name = "Sword";
+            strncpy(new_item->name, "Sword", sizeof(new_item->name) - 1);
             new_item->damage = 15;
             new_item->throw_range = 0;  // Melee weapon
             new_item->can_throw = false;
             break;
             
         case DAGGER_SYMBOL:
-            new_item->name = "Dagger";
+            strncpy(new_item->name, "Dagger", sizeof(new_item->name) - 1);
             new_item->damage = 8;
             new_item->throw_range = 5;
             new_item->can_throw = true;
             break;
             
         case MAGIC_WAND_SYMBOL:
-            new_item->name = "Magic Wand";
+            strncpy(new_item->name, "Magic wand", sizeof(new_item->name) - 1);
             new_item->damage = 12;
             new_item->throw_range = 8;
             new_item->can_throw = true;
             break;
             
         case ARROW_SYMBOL:
-            new_item->name = "Arrow";
+            strncpy(new_item->name, "Arrow", sizeof(new_item->name) - 1);
             new_item->damage = 5;
             new_item->throw_range = 6;
             new_item->can_throw = true;
             break;
             
         case MACE_SYMBOL:
-            new_item->name = "Mace";
+            strncpy(new_item->name, "Mace", sizeof(new_item->name) - 1);
             new_item->damage = 18;
             new_item->throw_range = 0;  // Melee weapon
             new_item->can_throw = false;
@@ -1138,7 +1138,7 @@ void init_inventory() {
     player_inventory.count = 0;
     for (int i = 0; i < MAX_INVENTORY; i++) {
         player_inventory.items[i].symbol = ' ';
-        player_inventory.items[i].name = NULL;
+        //strncpy(player_inventory.items[i].name, NULL, sizeof(player_inventory.items[i].name) - 1);
         player_inventory.items[i].heal_value = 0;
         player_inventory.items[i].damage = 0;
         player_inventory.items[i].isEquipped = false;
@@ -2609,6 +2609,44 @@ void place_golden_key(Room* rooms, int room_count) {
     }
 }
 
+void update_user_score(const char* username, int new_score) {
+    FILE *users = fopen("user_info.txt", "rb+");
+    if (users == NULL) {
+        mvprintw(40, 1, "Error: Could not open user file!");
+        refresh();
+        return;
+    }
+
+    User temp_user;
+    bool found = false;
+    
+    // Find the user's record
+    while (fread(&temp_user, sizeof(User), 1, users) == 1) {
+        if (strcmp(temp_user.username, username) == 0) {
+            // Move file pointer back to start of this record
+            fseek(users, -sizeof(User), SEEK_CUR);
+            
+            // Update score (add new score to existing score)
+            temp_user.score += new_score;
+            temp_user.played++; // Increment games played counter
+            
+            // Write updated record back to file
+            fwrite(&temp_user, sizeof(User), 1, users);
+            found = true;
+            break;
+        }
+    }
+
+    fclose(users);
+
+    if (found) {
+        mvprintw(40, 1, "Score updated successfully! Total score: %d", temp_user.score);
+    } else {
+        mvprintw(40, 1, "Error: Could not find user record!");
+    }
+    refresh();
+}
+
 bool try_use_golden_key(void) {
     // Check if key breaks
     if (rand() % 100 < KEY_BREAK_CHANCE) {
@@ -2616,7 +2654,7 @@ bool try_use_golden_key(void) {
         for (int i = 0; i < player_inventory.count; i++) {
             if (player_inventory.items[i].symbol == GOLDEN_KEY && !player_inventory.items[i].isBroken) {
                 player_inventory.items[i].symbol = BROKEN_KEY;
-                player_inventory.items[i].name = "Broken Golden Key";
+                strncpy(player_inventory.items[i].name, "BROKEN GOLDEN KEY", sizeof(player_inventory.items[i].name) - 1);
                 player_inventory.items[i].isBroken = true;
                 mvprintw(40, 1, "The Golden Key broke while using it!");
                 refresh();
@@ -2647,7 +2685,7 @@ void combine_broken_keys(void) {
                 
                 // Convert first key back to golden key
                 player_inventory.items[first_key_index].symbol = GOLDEN_KEY;
-                player_inventory.items[first_key_index].name = "Golden Key";
+                strncpy(player_inventory.items[first_key_index].name, "GOLDEN KEY", sizeof(player_inventory.items[first_key_index].name) - 1);
                 player_inventory.items[first_key_index].isBroken = false;
                 
                 mvprintw(40, 1, "Combined 2 broken keys into a new Golden Key!");
@@ -3940,673 +3978,6 @@ void color_settings_menu(void) {
     }
 }
 
-void game_loop(void) {
-    time_t game_start_time = time(NULL);
-int ch;
-    while ((ch = getch()) != 'q') {
-        mvprintw(player.y, player.x, " ");
-        mvprintw(40, 1, "                                      ");
-
-        switch (ch) {
-            case KEY_UP:
-            case KEY_DOWN:
-            case KEY_LEFT:
-            case KEY_RIGHT:
-                {
-                    int new_x = player.x;
-                    int new_y = player.y;
-                    mvprintw(42, 40, "player position x=%d, y=%d", player.x, player.y);
-                    refresh();
-                    int pre_x = player.x;
-                    int pre_y = player.y; 
-                    switch (ch) {
-                        case KEY_UP:    new_y--; break;
-                        case KEY_DOWN:  new_y++; break;
-                        case KEY_LEFT:  new_x--; break;
-                        case KEY_RIGHT: new_x++; break;
-                    }
-                    
-                            if (new_y > 0 && new_y < MAP_HEIGHT - 1 && new_x > 0 && new_x < MAP_WIDTH - 1 &&
-            map[new_y][new_x] != VERTICAL && map[new_y][new_x] != HORIZ && 
-            map[new_y][new_x] != PILLAR) {
-
-            // Check for items and nightmare room effects
-            if (map[new_y][new_x] == GOLD_SMALL || 
-                map[new_y][new_x] == FOOD || 
-                map[new_y][new_x] == POTION_HEALTH ||
-                map[new_y][new_x] == POTION_SPEED ||
-                map[new_y][new_x] == POTION_DAMAGE) {
-                
-                // Check if in nightmare room
-                bool in_nightmare = false;
-                for (int i = 0; i < current_level.room_count; i++) {
-                    if (current_level.rooms[i].room_type == NIGHTMARE_ROOM &&
-                        new_x >= current_level.rooms[i].x && 
-                        new_x <= current_level.rooms[i].x + current_level.rooms[i].width &&
-                        new_y >= current_level.rooms[i].y && 
-                        new_y <= current_level.rooms[i].y + current_level.rooms[i].height) {
-                        in_nightmare = true;
-                        break;
-                    }
-                }
-                
-                if (in_nightmare) {
-                    // Items in nightmare room are illusions
-                    map[new_y][new_x] = FLOOR;
-                    mvprintw(40, 1, "The item dissolves... it was just an illusion!");
-                } else {
-                    // Normal item pickup logic
-                    if (map[new_y][new_x] == GOLD_SMALL) {
-                        int gold_value = gold_values[new_y][new_x];
-                        map[new_y][new_x] = FLOOR;
-                        score += gold_value;
-                        mvprintw(40, 1, "You found a coin worth %d gold!", gold_value);
-                    } else if (map[new_y][new_x] == FOOD) {
-                        pickup_food(new_x, new_y);
-                    } else if (map[new_y][new_x] == POTION_HEALTH ||
-                             map[new_y][new_x] == POTION_SPEED ||
-                             map[new_y][new_x] == POTION_DAMAGE) {
-                        pickup_potion(map[new_y][new_x], new_x, new_y);
-                    }
-                }
-                }}
-
-
-                    // Check if move is valid
-                    if (new_y > 0 && new_y < MAP_HEIGHT - 1 && new_x > 0 && new_x < MAP_WIDTH - 1 &&
-                        map[new_y][new_x] != VERTICAL && map[new_y][new_x] != HORIZ && 
-                        map[new_y][new_x] != PILLAR &&
-                        (map[new_y][new_x] == FLOOR || map[new_y][new_x] == DOOR ||
-                         map[new_y][new_x] == '#' || map[new_y][new_x] == GOLD_SMALL ||
-                         map[new_y][new_x] == GOLD_MEDIUM || map[new_y][new_x] == GOLD_LARGE ||
-                         map[new_y][new_x] == STAIR || map[new_y][new_x] == TRAP_HIDDEN ||map[new_y][new_x] == FOOD||
-                         map[new_y][new_x] == SWORD_SYMBOL ||    // Add these lines
-                         map[new_y][new_x] == DAGGER_SYMBOL ||
-                         map[new_y][new_x] == MAGIC_WAND_SYMBOL ||
-                         map[new_y][new_x] == ARROW_SYMBOL ||
-                         map[new_y][new_x] == PASSWORD_SYMBOL ||
-                         map[new_y][new_x] == LOCKED_DOOR ||
-                         map[new_y][new_x] == GOLDEN_KEY||
-                         map[new_y][new_x] == BROKEN_KEY ||
-                         map[new_y][new_x] == ENEMY_DEMON ||
-                         map[new_y][new_x] == ENEMY_FIRE ||
-                         map[new_y][new_x] == ENEMY_GIANT ||
-                         map[new_y][new_x] == ENEMY_SNAKE ||
-                         map[new_y][new_x] == ENEMY_UNDEAD ||
-                         map[new_y][new_x] == POTION_HEALTH || 
-                         map[new_y][new_x] == POTION_SPEED ||
-                         map[new_y][new_x] == POTION_DAMAGE
-                         )) {
-                        
-                        // Clear old position
-                        mvprintw(player.y, player.x, " ");
-                        
-                    
-                       if (map[new_y][new_x] == POTION_HEALTH ||
-                       map[new_y][new_x] == POTION_SPEED ||
-                       map[new_y][new_x] == POTION_DAMAGE) {
-                        pickup_potion(map[new_y][new_x], new_x, new_y);
-                }   
-
-                // Add this after player movement
-                if (ch == KEY_UP || ch == KEY_DOWN || ch == KEY_LEFT || ch == KEY_RIGHT) {
-                int hunger_decrease;
-                switch(dif_lvl) {
-                case 0: hunger_decrease = HUNGER_DECREASE_EASY; break;
-                case 1: hunger_decrease = HUNGER_DECREASE_MEDIUM; break;
-                case 2: hunger_decrease = HUNGER_DECREASE_HARD; break;
-                default: hunger_decrease = HUNGER_DECREASE_MEDIUM;
-    }
-    current_hunger = MAX(0, current_hunger - hunger_decrease);
-    
-                // Handle hunger effects
-                if (current_hunger >= 70) {  // When well fed
-                if (player_health < MAX_HEALTH) {
-                player_health = MIN(player_health + HUNGER_HEALTH_REGEN, MAX_HEALTH);
-                mvprintw(38, 1, "You feel well fed. Health regenerated!");
-        }
-    } 
-    else if (current_hunger <= 0) {  // When starving
-        player_health -= HUNGER_HEALTH_DAMAGE;
-        mvprintw(38, 1, "You are starving! Lost %d health!", HUNGER_HEALTH_DAMAGE);
-    }
-}
-
-                        // Update player position
-                        player.x = new_x;
-                        player.y = new_y;
-                        
-                        // Inside your movement case block, after checking for valid move:
-                        if (new_x == password_location.x && new_y == password_location.y && !password_shown) {
-                        password_shown = true;
-                        password_show_time = time(NULL);
-                        attron(COLOR_PAIR(2) | A_BOLD);
-                        mvprintw(38, 2, "Password: %s", current_password);
-                        attroff(COLOR_PAIR(2) | A_BOLD);
-                        }                    
-if (new_x == locked_door_location.x && new_y == locked_door_location.y && !door_unlocked) {
-    // Check for golden key first
-    bool has_key = false;
-    for (int i = 0; i < player_inventory.count; i++) {
-        if (player_inventory.items[i].symbol == GOLDEN_KEY && !player_inventory.items[i].isBroken) {
-            has_key = true;
-            if (try_use_golden_key()) {
-                door_unlocked = true;
-                player_inventory.items[i].isBroken = true;
-                map[locked_door_location.y][locked_door_location.x] = DOOR;
-                mvprintw(40, 1, "Unlocked door with Golden Key!");
-                refresh();
-                break;
-            }
-        }
-    }
-    if(!has_key){
-    // Clear any existing messages
-    move(38, 1);
-    clrtoeol();
-    move(40, 1);
-    clrtoeol();
-    
-    char input_password[5];
-    echo(); // Enable input echo
-    mvprintw(38, 1, "Enter password: ");
-    refresh();
-    getnstr(input_password, 4);
-    noecho(); // Disable input echo
-    input_password[4] = '\0'; // Ensure null termination
-
-    if (strcmp(input_password, current_password) == 0) {
-        move(38, 1);
-        clrtoeol();
-        mvprintw(40, 1, "Door unlocked!");
-        refresh();
-        door_unlocked = true;
-        map[locked_door_location.y][locked_door_location.x] = DOOR;
-        // Allow movement to new position
-        player.x = new_x;
-        player.y = new_y;
-    } else {
-        move(38, 1);
-        clrtoeol();
-        mvprintw(40, 1, "Wrong password!");
-        player.x = pre_x;
-        player.y = pre_y;
-        refresh();
-        // Do not update player position at all - they stay at their current position
-        new_x = player.x;  // Reset the new position to current position
-        new_y = player.y;
-        
-        // Redraw player at current position
-        attron(COLOR_PAIR(2) | A_BOLD);
-        mvprintw(player.y, player.x, "@");
-        attroff(COLOR_PAIR(2) | A_BOLD);
-    }
-    
-    // Wait a moment to show the message
-    refresh();
-    napms(1000); // Wait 1 second
-    
-    // Clear the messages
-    move(38, 1);
-    clrtoeol();
-    move(40, 1);
-    clrtoeol();
-    
-    refresh();
-}
-}
-
-                        // Check for trap
-                        if (trap_locations[player.y][player.x] && !revealed_traps[player.y][player.x]) {
-                            player_health -= TRAP_DAMAGE;
-                            revealed_traps[player.y][player.x] = 1;
-                            map[player.y][player.x] = TRAP_VISIBLE;
-                            
-                            attron(COLOR_PAIR(4) | A_BOLD);
-                            mvprintw(40, 1, "You stepped on a trap! -%d HP", TRAP_DAMAGE);
-                            attroff(COLOR_PAIR(4) | A_BOLD);
-                        }
-                        // Check for gold collection
-                        else if (map[player.y][player.x] == GOLD_SMALL) {
-                        int gold_value = gold_values[player.y][player.x];
-                        map[player.y][player.x] = FLOOR;
-                        score += gold_value;
-                        mvprintw(40, 1, "You found a coin worth %d gold!", gold_value);
-}
-
-                        //check for food
-                        
-else if (map[player.y][player.x] == FOOD) {
-    pickup_food(player.x, player.y);
-}
-
-else if (map[player.y][player.x] == GOLDEN_KEY) {
-    if (player_inventory.count < MAX_INVENTORY) {
-        map[player.y][player.x] = FLOOR;
-        Item* new_key = &player_inventory.items[player_inventory.count];
-        new_key->symbol = GOLDEN_KEY;
-        new_key->name = "Golden Key";
-        new_key->isWeapon = false;
-        new_key->isKey = true;
-        new_key->isBroken = false;
-        player_inventory.count++;
-        mvprintw(40, 1, "Picked up a Golden Key!");
-    } else {
-        mvprintw(40, 1, "Inventory full! Cannot pick up Golden Key!");
-    }
-}
-
-else if (map[player.y][player.x] == SWORD_SYMBOL ||
-         map[player.y][player.x] == DAGGER_SYMBOL ||
-         map[player.y][player.x] == MAGIC_WAND_SYMBOL ||
-         map[player.y][player.x] == ARROW_SYMBOL) {
-    // Clear any previous messages
-    for(int i = 37; i <= 40; i++) {
-        move(i, 1);
-        clrtoeol();
-    }
-    pickup_weapon(map[player.y][player.x], player.x, player.y);
-    refresh();
-}
-if (speed_active) {
-    speed_potion_moves--;
-    if (speed_potion_moves <= 0) {
-        speed_active = false;
-        mvprintw(40, 1, "Speed potion effect has worn off!");
-        refresh();
-    } else {
-        mvprintw(40, 1, "Speed boost active! (%d moves left) Press arrow key for second move...", 
-                 speed_potion_moves);
-        refresh();
-        int second_move = getch();
-        if (second_move == KEY_UP || second_move == KEY_DOWN ||
-            second_move == KEY_LEFT || second_move == KEY_RIGHT) {
-            int new_x = player.x;
-            int new_y = player.y;
-            
-            switch (second_move) {
-                case KEY_UP:    new_y--; break;
-                case KEY_DOWN:  new_y++; break;
-                case KEY_LEFT:  new_x--; break;
-                case KEY_RIGHT: new_x++; break;
-            }
-            
-            // Check if second move is valid
-            if (new_y > 0 && new_y < MAP_HEIGHT - 1 && new_x > 0 && new_x < MAP_WIDTH - 1 &&
-                map[new_y][new_x] != VERTICAL && map[new_y][new_x] != HORIZ && 
-                map[new_y][new_x] != PILLAR &&
-                (map[new_y][new_x] == FLOOR || map[new_y][new_x] == DOOR ||
-                 map[new_y][new_x] == '#' || map[new_y][new_x] == GOLD_SMALL ||
-                 // ... add all valid movement tiles here
-                 map[new_y][new_x] == POTION_DAMAGE)) {
-                
-                // Clear old position
-                mvprintw(player.y, player.x, " ");
-                
-                // Update player position
-                player.x = new_x;
-                player.y = new_y;
-                
-                // Handle item pickups and interactions for second move
-                // (Copy the same item pickup logic from your first move)
-            }
-        }
-        move(40, 1);
-        clrtoeol();  // Clear the speed boost message
-    }
-}
-    if (damage_active) {
-    moves_since_potion++;
-    if (moves_since_potion >= POTION_DURATION) {
-        damage_active = false;
-        mvprintw(40, 1, "Damage potion effect has worn off!");
-        refresh();
-    } else {
-        mvprintw(39, 1, "Damage boost active! (%d moves left)", 
-                 POTION_DURATION - moves_since_potion);
-    }
-}
-}
-break;
-}
-
-// In your main menu or game menu
-case 'S': // Save game
-    handle_save_game(current_user);
-    break;
-case 'L': // Load game
-    handle_load_game(current_user);
-    break;
-
-case ' ':  // SPACE key for attacks
-    {
-        // Find equipped weapon
-        Item* equipped_weapon = NULL;
-        for(int i = 0; i < player_inventory.count; i++) {
-            if(player_inventory.items[i].isEquipped && player_inventory.items[i].isWeapon) {
-                equipped_weapon = &player_inventory.items[i];
-                break;
-            }
-        }
-        
-        if(!equipped_weapon) {
-            mvprintw(40, 1, "No weapon equipped!");
-            refresh();
-            break;
-        }
-
-        // For melee weapons (sword and mace)
-        if(equipped_weapon->symbol == 'M' || equipped_weapon->symbol == 'I') {
-            attack_with_weapon((location){player.x, player.y}, 
-                             equipped_weapon->symbol, 0, 0);
-        } else {
-            // For ranged weapons
-            mvprintw(40, 1, "Choose direction (arrow keys)");
-            refresh();
-            int dir = getch();
-            int dx = 0, dy = 0;
-            
-            switch(dir) {
-                case KEY_UP:    dy = -1; break;
-                case KEY_DOWN:  dy = 1;  break;
-                case KEY_LEFT:  dx = -1; break;
-                case KEY_RIGHT: dx = 1;  break;
-                default: 
-                    mvprintw(40, 1, "Invalid direction!");
-                    refresh();
-                    break;
-            }
-            
-            if(dx != 0 || dy != 0) {
-                throw_weapon((location){player.x, player.y}, dx, dy, 
-                           equipped_weapon->throw_range, 
-                           equipped_weapon->damage, 
-                           equipped_weapon->symbol == 'D');  // Only daggers drop
-            }
-        }
-    }
-    break;
-
-case 'a': // Repeat last shot
-    if(last_shot_made) {
-        Item* equipped_weapon = NULL;
-        for(int i = 0; i < player_inventory.count; i++) {
-            if(player_inventory.items[i].isEquipped && player_inventory.items[i].isWeapon) {
-                equipped_weapon = &player_inventory.items[i];
-                break;
-            }
-        }
-        
-        if(!equipped_weapon || equipped_weapon->count <= 0) {
-            mvprintw(40, 1, "Cannot repeat shot - no ammo!");
-            break;
-        }
-        
-        if(equipped_weapon->symbol == 'M' || equipped_weapon->symbol == 'I') {
-            attack_with_weapon((location){player.x, player.y}, 
-                             equipped_weapon->symbol, 0, 0);
-        } else {
-            throw_weapon((location){player.x, player.y}, last_shot_dx, last_shot_dy,
-                        equipped_weapon->throw_range, 
-                        equipped_weapon->damage, true);
-        }
-    }
-break;
-
-case 'm':
-clear();
-draw_map();
-update_status_line(score, level, player_health, player, game_start_time);
-draw_borders();
-refresh();   
-getch();
-// napms(2000);
-break; 
-
-case 'p': // Pause game
-case 'P':
-    pause_menu();
-    break;
-
-case 'i':  // Open/close inventory
-    display_inventory();
-    while (1) {
-        int ch = getch();
-        if (ch == 'i') {
-            break;  // Exit inventory
-        } else if (ch >= '1' && ch <= '9') {
-            use_item(ch - '1');
-            display_inventory();  // Refresh inventory display
-            refresh();
-        } else if(ch == 'd') {
-            drop_item();
-            display_inventory();
-            refresh();
-        } else if(ch == 'c') {  // Combine broken keys
-            combine_broken_keys();
-            display_inventory();
-            refresh();
-        }
-    }
-    // Redraw the game screen
-    clear();
-    draw_borders();
-    vision();
-    update_status_line(score, level, player_health, player, game_start_time);
-    break;
-
-        }
-
-        // Check for player death
-        if (player_health <= 0) {
-            clear();
-            attron(COLOR_PAIR(4) | A_BOLD);
-            mvprintw(20, MAP_WIDTH/2 - 3, "GAME OVER!");
-            attroff(COLOR_PAIR(4) | A_BOLD);
-            mvprintw(22,MAP_WIDTH/2 - 5, "YOUR SCORE:%d",score);
-            refresh();
-            napms(2000);  // Wait 2 seconds
-            getch();
-            break;  // Exit the game loop
-        }
-
-        if(map[player.y][player.x] == STAIR) {
-            mvprintw(40, 1, "Press ENTER to go to next level");
-            refresh();
-            int ch;
-            while ((ch = getch()) != '\n' && ch != 'q') {
-                // Wait for ENTER or q
-            }
-            if (ch != 'q') {
-                if(level == 5){
-            clear();
-            attron(COLOR_PAIR(2) | A_BOLD);
-            int temp = 30;
-            mvprintw(0,temp,"                                     :x$$$$$$&&&&&&&&&&&&$$$$x:                                     ");
-            mvprintw(1,temp,"                             :&&&&&$X&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&$;                              ");
-            mvprintw(2,temp,"                             $&&     ;&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&$                             ");
-            mvprintw(3,temp,"                   x&&&&&&&&&&&&     X&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&X                   ");
-            mvprintw(4,temp,"                  &&&&&&&&&&&&&&     $&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&.                 ");
-            mvprintw(5,temp,"                 x&&&        X&&;    $&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&X        &&&X                 ");
-            mvprintw(6,temp,"                 +&&&.       ;&&x    $&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&+        &&&+                 ");
-            mvprintw(7,temp,"                  &&&&        &&X    $&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&        &&&&                  ");
-            mvprintw(8,temp,"                  &&&&        &&X    $&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&        &&&&                  ");
-            mvprintw(9,temp,"                   $&&&.      &&&:   x&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&      .&&&&.                  ");
-            mvprintw(10,temp,"                    $&&&X     :&&+   .&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&:     x&&&$.                   ");
-            mvprintw(11,temp,"                     X&&&$:    &&$.   &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&    .$&&&X                     ");
-            mvprintw(12,temp,"                      .&&&&X.   &&+   &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&.   X&&&&:                      ");
-            mvprintw(13,temp,"                        ;&&&&X. x&&.   &&&&&&&&&&&&&&&&&&&&&&&&&&&&x .X&&&&;                        ");
-            mvprintw(14,temp,"                          +&&&&$+&&$   &&&&&&&&&&&&&&&&&&&&&&&&&&&&+$&&&&x                          ");
-            mvprintw(15,temp,"                            x&&&&&&&x   &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&x                            ");
-            mvprintw(16,temp,"                              :&&&&&&x  x&&&&&&&&&&&&&&&&&&&&&&&&&&&&:                              ");
-            mvprintw(17,temp,"                                 x&&&&X  $&&&&&&&&&&&&&&&&&&&&&&&&x                                 ");
-            mvprintw(18,temp,"                                    x&&X .&&&&&&&&&&&&&&&&&&&&&X                                    ");
-            mvprintw(19,temp,"                                      &&$.:&&&&&&&&&&&&&&&&&&&                                      ");
-            mvprintw(20,temp,"                                        &&::$&&&&&&&&&&&&&&&.                                       ");
-            mvprintw(21,temp,"                                         ;&&.$&&&&&&&&&&&&+                                         ");
-            mvprintw(22,temp,"                                           +&&&&&&&&&&&$x                                           ");
-            mvprintw(23,temp,"                                             +&&&&&&&&+                                             ");
-            mvprintw(24,temp,"                                            x&&&&&&&&&&X                                            ");
-            mvprintw(25,temp,"                                             X$&&&&&&$X                                             ");
-            mvprintw(26,temp,"                                                &&&&                                                ");
-            mvprintw(27,temp,"                                                &&&&                                                ");
-            mvprintw(28,temp,"                                                &&&&                                                ");
-            mvprintw(29,temp,"                                                &&&&                                                ");
-            mvprintw(30,temp,"                                               +&&&&x                                               ");
-            mvprintw(31,temp,"                                              :&&&&&&:                                              ");
-            mvprintw(32,temp,"                                             x&&&&&&&&x                                             ");
-            mvprintw(33,temp,"                                         :+$&&&&&&&&&&&&$+:                                         ");
-            mvprintw(34,temp,"                                    :&&&&&&&&&&&&&&&&&&&&&&&&&&$                                    ");
-            mvprintw(35,temp,"                                 .xx&&&&&&&&&&&&&&&&&&&&&&&&&&&&$x+                                 ");
-            mvprintw(36,temp,"                                X&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&:                               ");
-            mvprintw(37,temp,"                                &&&&&&$++++++++++++++++++++++x&&&&&&+                               ");
-            mvprintw(38,temp,"                                &&&&&$ ;                    ;. &&&&&+                               ");
-            mvprintw(39,temp,"                                &&&&&$                         &&&&&+                               ");
-            mvprintw(40,temp,"                                &&&&&$                         &&&&&+                               ");
-            mvprintw(41,temp,"                                &&&&&$                         &&&&&+                               ");
-            mvprintw(42,temp,"                                &&&&&&.                       +&&&&&+                               ");
-            mvprintw(43,temp,"                                $&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&;                               ");
-            mvprintw(44,temp,"                                 X$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$X+                                ");
-            attroff(COLOR_PAIR(2) | A_BOLD);
-            attron(COLOR_PAIR(8) | A_BOLD);
-            mvprintw(38,76, "YOU WON!");
-            attroff(COLOR_PAIR(8) | A_BOLD);
-            mvprintw(40,74, "YOUR SCORE:%d",score);
-            refresh();
-            napms(2000);  
-            getch();
-            break;  
-                }
-                else{
-                // Store current stair information before generating new level
-                StairInfo prev_level_stair;
-                prev_level_stair.stair_pos.x = player.x;
-                prev_level_stair.stair_pos.y = player.y;
-                
-                // Find the room containing the stairs
-                for (int i = 0; i < current_level.room_count; i++) {
-                    if (player.x >= current_level.rooms[i].x && 
-                        player.x <= current_level.rooms[i].x + current_level.rooms[i].width &&
-                        player.y >= current_level.rooms[i].y && 
-                        player.y <= current_level.rooms[i].y + current_level.rooms[i].height) {
-                        prev_level_stair.room = current_level.rooms[i];
-                        prev_level_stair.original_x = current_level.rooms[i].x;
-                        prev_level_stair.original_y = current_level.rooms[i].y;
-                        break;
-                    }
-                }
-
-                // Generate new level
-                clear();
-                init_map();
-                memset(trap_locations, 0, sizeof(trap_locations));
-                memset(revealed_traps, 0, sizeof(revealed_traps));
-                generate_rooms(&prev_level_stair, &player);
-                level++;
-                
-                // Place player at the stairs position
-                player.x = prev_level_stair.stair_pos.x;
-                player.y = prev_level_stair.stair_pos.y;
-                map[player.y][player.x] = FLOOR;  // Remove stair symbol at player position
-                
-                draw_borders();
-                vision();
-                //draw_map();
-                // mvprintw(42, 1, "Date/Time (UTC): %s", datetime);
-                update_status_line(score, level, player_health, player, game_start_time);
-                attron(COLOR_PAIR(2) | A_BOLD);
-                mvprintw(player.y, player.x, "@");
-                attroff(COLOR_PAIR(2) | A_BOLD);
-                refresh();
-            }
-        }
-        }
-// In your main game loop, where you update enemies:
-for (int i = 0; i < current_enemies.count && i < MAX_ENEMIES; i++) {
-    Enemy* enemy = &current_enemies.enemies[i];
-    if (!enemy || !enemy->is_active) continue;
-    
-    // Update tracking status
-    update_enemy_tracking(enemy, player.x, player.y);
-    
-    // Move enemy if tracking
-    if (enemy->is_tracking) {
-        // Check if enemy is adjacent to player
-        if (abs(enemy->x - player.x) <= 1 && abs(enemy->y - player.y) <= 1) {
-            // Attack player
-            player_health -= enemy->damage;
-            attron(COLOR_PAIR(4) | A_BOLD);
-            mvprintw(40, 1, "%c attacks you for %d damage!", enemy->type, enemy->damage);
-            attroff(COLOR_PAIR(4) | A_BOLD);
-        } else {
-            // Move enemy
-            if (move_enemy(enemy, player.x, player.y)) {
-                if (enemy->type != ENEMY_SNAKE) {
-                    enemy->follow_count--;
-                    if (enemy->follow_count <= 0) {
-                        enemy->is_tracking = false;
-                    }
-                }
-            }
-        }
-    }
-    // Add this after your movement switch statement and before enemy updates
-if (health_active && potion_moves_left > 0) {
-    if (player_health < MAX_HEALTH) {
-        int heal_amount = health_regen_rate;
-        if (player_health + heal_amount > MAX_HEALTH) {
-            heal_amount = MAX_HEALTH - player_health;
-        }
-        player_health += heal_amount;
-        mvprintw(39, 1, "Health regenerated! +%d HP (%d steps left)", 
-                 heal_amount, potion_moves_left);
-    }
-    
-    potion_moves_left--;
-    if (potion_moves_left <= 0) {
-        health_active = false;
-        health_regen_rate = 0;
-        mvprintw(40, 1, "Health regeneration effect has worn off!");
-    }
-}
-}
-        // Update status lines
-        update_status_line(score, level, player_health, player, game_start_time);
-        draw_borders();
-        vision();
-        //draw_map();
-
-        // Draw revealed traps
-        for (int y = 0; y < MAP_HEIGHT; y++) {
-            for (int x = 0; x < MAP_WIDTH; x++) {
-                if (trap_locations[y][x] && revealed_traps[y][x]) {
-                    attron(COLOR_PAIR(4));
-                    mvprintw(y, x, "%c", TRAP_VISIBLE);
-                    attroff(COLOR_PAIR(4));
-                }
-            }
-        }
-
-        // Draw player
-        attron(COLOR_PAIR(2) | A_BOLD);
-        mvprintw(player.y, player.x, "@");
-        attroff(COLOR_PAIR(2) | A_BOLD);
-
-        if (password_shown && time(NULL) - password_show_time >= 5) {
-        password_shown = false;
-        mvprintw(38, 1, "                                     ");
-}
-
-        // Refresh the static info
-        // mvprintw(42, 1, "Date/Time (UTC): %s", datetime);
-        refresh();
-    }
-    
-refresh();
-}
-
-
-
 int main(void) {
     initscr();
     noecho();
@@ -5073,7 +4444,7 @@ else if (map[player.y][player.x] == GOLDEN_KEY) {
         map[player.y][player.x] = FLOOR;
         Item* new_key = &player_inventory.items[player_inventory.count];
         new_key->symbol = GOLDEN_KEY;
-        new_key->name = "Golden Key";
+        strncpy(new_key->name, "GOLDEN KEY", sizeof(new_key->name) - 1);
         new_key->isWeapon = false;
         new_key->isKey = true;
         new_key->isBroken = false;
@@ -5360,11 +4731,26 @@ case 'i':  // Open/close inventory
             mvprintw(38,76, "YOU WON!");
             attroff(COLOR_PAIR(8) | A_BOLD);
             mvprintw(40,74, "YOUR SCORE:%d",score);
-            refresh();
-            napms(2000);  
-            getch();
-            break;  
-                }
+            FILE *users = fopen("user_info.txt", "rb");
+            User temp_user;
+            int total_score = 0;
+            if (users != NULL) {
+            while (fread(&temp_user, sizeof(User), 1, users) == 1) {
+                if (strcmp(temp_user.username, current_user) == 0) {
+                    total_score = temp_user.score + score;
+                    break;
+            }
+        }
+            fclose(users);
+    }
+    
+                update_user_score(current_user, score);
+                mvprintw(41,74, "TOTAL SCORE: %d", total_score);
+                refresh();
+                napms(2000);  
+                getch();
+                    break;  
+}
                 else{
                 // Store current stair information before generating new level
                 StairInfo prev_level_stair;

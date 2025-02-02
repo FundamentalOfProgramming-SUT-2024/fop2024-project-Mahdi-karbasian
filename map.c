@@ -522,14 +522,17 @@ void pickup_weapon(char weapon_symbol, int x, int y) {
     new_item->isKey = false;
     new_item->category = CAT_WEAPON;  // Set proper category
     new_item->isEquipped = false;
-    new_item->count = 1;  // Start with 1 for new stack
+
+    // Add these lines here:
+    new_item->count = 1;
+    new_item->max_stack = (weapon_symbol == 'D') ? 10 :     // Dagger
+                         (weapon_symbol == '%') ? 8 :      // Magic Wand
+                         (weapon_symbol == 'V') ? 20 : 1;  // Arrow or other
     
     switch(weapon_symbol) {
         case SWORD_SYMBOL:
             new_item->name = "Sword";
             new_item->damage = 15;
-            new_item->count = 1;
-            new_item->max_stack = 1;
             new_item->throw_range = 0;  // Melee weapon
             new_item->can_throw = false;
             break;
@@ -537,8 +540,6 @@ void pickup_weapon(char weapon_symbol, int x, int y) {
         case DAGGER_SYMBOL:
             new_item->name = "Dagger";
             new_item->damage = 8;
-            new_item->count = 1;
-            new_item->max_stack = 10;
             new_item->throw_range = 5;
             new_item->can_throw = true;
             break;
@@ -546,8 +547,6 @@ void pickup_weapon(char weapon_symbol, int x, int y) {
         case MAGIC_WAND_SYMBOL:
             new_item->name = "Magic Wand";
             new_item->damage = 12;
-            new_item->count = 1;
-            new_item->max_stack = 8;
             new_item->throw_range = 8;
             new_item->can_throw = true;
             break;
@@ -555,8 +554,6 @@ void pickup_weapon(char weapon_symbol, int x, int y) {
         case ARROW_SYMBOL:
             new_item->name = "Arrow";
             new_item->damage = 5;
-            new_item->count = 1;
-            new_item->max_stack = 20;
             new_item->throw_range = 6;
             new_item->can_throw = true;
             break;
@@ -564,18 +561,7 @@ void pickup_weapon(char weapon_symbol, int x, int y) {
         case MACE_SYMBOL:
             new_item->name = "Mace";
             new_item->damage = 18;
-            new_item->count = 1;
-            new_item->max_stack = 1;
             new_item->throw_range = 0;  // Melee weapon
-            new_item->can_throw = false;
-            break;
-            
-        default:
-            new_item->name = "Unknown Weapon";
-            new_item->damage = 1;
-            new_item->count = 1;
-            new_item->max_stack = 1;
-            new_item->throw_range = 0;
             new_item->can_throw = false;
             break;
     }
@@ -2323,45 +2309,136 @@ void remove_item_from_inventory(Item* item) {
 void throw_weapon(location start, int dx, int dy, int max_range, int damage, bool drops_after_hit) {
     int current_x = start.x;
     int current_y = start.y;
+    int distance = 0;
     bool hit_something = false;
+    
+    // Get the equipped weapon
+    Item* equipped_weapon = NULL;
+    for(int i = 0; i < player_inventory.count; i++) {
+        if(player_inventory.items[i].isEquipped && player_inventory.items[i].isWeapon) {
+            equipped_weapon = &player_inventory.items[i];
+            break;
+        }
+    }
+    
+    if (!equipped_weapon) {
+        mvprintw(40, 1, "No weapon equipped!");
+        refresh();
+        return;
+    }
 
+    // Check if we have enough ammo
+    if (equipped_weapon->count <= 0) {
+        mvprintw(40, 1, "Out of ammo!");
+        refresh();
+        return;
+    }
+
+    char weapon_symbol = equipped_weapon->symbol;
+    
     // Debug message
-    mvprintw(37, 1, "Throwing weapon from %d,%d in direction %d,%d", 
-             start.x, start.y, dx, dy);
-    refresh();
-
-    for(int distance = 0; distance < max_range && !hit_something; distance++) {
+    mvprintw(36, 1, "Throwing %c (%d/%d remaining)", 
+             weapon_symbol, equipped_weapon->count, equipped_weapon->max_stack);
+    
+    // Decrease weapon count BEFORE throwing
+    equipped_weapon->count--;
+    
+    // Store original map
+    char original_chars[MAP_HEIGHT][MAP_WIDTH];
+    memcpy(original_chars, map, sizeof(map));
+    
+    while (distance < max_range && !hit_something) {
         current_x += dx;
         current_y += dy;
+        distance++;
+        
+        // Show animation
+        if (map[current_y][current_x] == FLOOR || map[current_y][current_x] == '#') {
+            attron(COLOR_PAIR(2) | A_BOLD);
+            mvaddch(current_y, current_x, weapon_symbol);
+            attroff(COLOR_PAIR(2) | A_BOLD);
+            refresh();
+            napms(50);
+            mvaddch(current_y, current_x, original_chars[current_y][current_x]);
+            refresh();
+        }
 
         // Check boundaries
-        if(current_x <= 1 || current_x >= MAP_WIDTH-2 || 
-           current_y <= 1 || current_y >= MAP_HEIGHT-2) {
+        if (current_x <= 1 || current_x >= MAP_WIDTH - 2 || 
+            current_y <= 1 || current_y >= MAP_HEIGHT - 2) {
+            if (drops_after_hit) {
+                int drop_x = current_x - dx;
+                int drop_y = current_y - dy;
+                if (map[drop_y][drop_x] == FLOOR || map[drop_y][drop_x] == '#') {
+                    map[drop_y][drop_x] = weapon_symbol;
+                }
+            }
+            hit_something = true;
             break;
         }
 
-        char target = map[current_y][current_x];
-        mvprintw(38, 1, "Checking position %d,%d (found: %c)", 
-                 current_x, current_y, target);
-        refresh();
-
         // Check for enemy hit
-        if(target >= ENEMY_DEMON && target <= ENEMY_UNDEAD) {
-            int final_damage = damage;
-            if(damage_active) {
-                final_damage *= 2;
+        if (map[current_y][current_x] >= ENEMY_DEMON && 
+            map[current_y][current_x] <= ENEMY_UNDEAD) {
+            damage_enemy(current_x, current_y, damage * (damage_active ? 2 : 1));
+            if (drops_after_hit) {
+                int drop_x = current_x - dx;
+                int drop_y = current_y - dy;
+                if (map[drop_y][drop_x] == FLOOR || map[drop_y][drop_x] == '#') {
+                    map[drop_y][drop_x] = weapon_symbol;
+                }
             }
-            damage_enemy(current_x, current_y, final_damage);
             hit_something = true;
             break;
         }
 
         // Check for obstacles
-        if(target == VERTICAL || target == HORIZ || 
-           target == PILLAR || target == DOOR) {
+        if (map[current_y][current_x] == VERTICAL || 
+            map[current_y][current_x] == HORIZ || 
+            map[current_y][current_x] == PILLAR ||
+            map[current_y][current_x] == DOOR) {
+            if (drops_after_hit) {
+                int drop_x = current_x - dx;
+                int drop_y = current_y - dy;
+                if (map[drop_y][drop_x] == FLOOR || map[drop_y][drop_x] == '#') {
+                    map[drop_y][drop_x] = weapon_symbol;
+                }
+            }
+            hit_something = true;
             break;
         }
     }
+    
+    // Handle max range
+    if (!hit_something && drops_after_hit) {
+        if (map[current_y][current_x] == FLOOR || map[current_y][current_x] == '#') {
+            map[current_y][current_x] = weapon_symbol;
+        }
+    }
+    
+    // Update inventory display
+    mvprintw(37, 1, "Weapon count now: %d/%d", 
+             equipped_weapon->count, equipped_weapon->max_stack);
+    
+    // Remove weapon if out of ammo
+    if (equipped_weapon->count <= 0) {
+        mvprintw(38, 1, "Out of %s! Removing from inventory.", equipped_weapon->name);
+        // Find the weapon in inventory and remove it
+        for (int i = 0; i < player_inventory.count; i++) {
+            if (&player_inventory.items[i] == equipped_weapon) {
+                // Shift remaining items left
+                for (int j = i; j < player_inventory.count - 1; j++) {
+                    player_inventory.items[j] = player_inventory.items[j + 1];
+                }
+                player_inventory.count--;
+                break;
+            }
+        }
+    }
+    
+    // Update display
+    vision();
+    refresh();
 }
 
 void damage_enemy(int x, int y, int damage) {
